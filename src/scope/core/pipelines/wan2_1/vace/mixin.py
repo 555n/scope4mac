@@ -149,34 +149,40 @@ class VACEEnabledPipeline:
                 from ...utils import Quantization
 
                 if quantization == Quantization.FP8_E4M3FN:
-                    logger.info(
-                        "_init_vace: Quantizing VACE components to FP8 (matching base model)..."
-                    )
-                    start = time.time()
+                    if device.type == "cuda":
+                        logger.info(
+                            "_init_vace: Quantizing VACE components to FP8 (matching base model)..."
+                        )
+                        start = time.time()
 
-                    from torchao.quantization.quant_api import (
-                        Float8DynamicActivationFloat8WeightConfig,
-                        PerTensor,
-                        quantize_,
-                    )
+                        from torchao.quantization.quant_api import (
+                            Float8DynamicActivationFloat8WeightConfig,
+                            PerTensor,
+                            quantize_,
+                        )
 
-                    quantize_(
-                        vace_wrapped_model.vace_patch_embedding,
-                        Float8DynamicActivationFloat8WeightConfig(
-                            granularity=PerTensor()
-                        ),
-                        device=device,
-                    )
-                    quantize_(
-                        vace_wrapped_model.vace_blocks,
-                        Float8DynamicActivationFloat8WeightConfig(
-                            granularity=PerTensor()
-                        ),
-                        device=device,
-                    )
-                    logger.info(
-                        f"_init_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s"
-                    )
+                        quantize_(
+                            vace_wrapped_model.vace_patch_embedding,
+                            Float8DynamicActivationFloat8WeightConfig(
+                                granularity=PerTensor()
+                            ),
+                            device=device,
+                        )
+                        quantize_(
+                            vace_wrapped_model.vace_blocks,
+                            Float8DynamicActivationFloat8WeightConfig(
+                                granularity=PerTensor()
+                            ),
+                            device=device,
+                        )
+                        logger.info(
+                            f"_init_vace: Quantized VACE to FP8 in {time.time() - start:.3f}s"
+                        )
+                    else:
+                        logger.info(
+                            "_init_vace: Skipping FP8 quantization on non-CUDA device, "
+                            "VACE components already on target device"
+                        )
             except ImportError:
                 logger.warning(
                     "_init_vace: Could not import Quantization, skipping quantization check"

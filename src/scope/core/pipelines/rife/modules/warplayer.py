@@ -4,7 +4,7 @@
 import torch
 import torch.nn as nn
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"))
 backwarp_tenGrid = {}
 
 
@@ -22,4 +22,6 @@ def warp(tenInput, tenFlow):
                          tenFlow[:, 1:2, :, :] / ((tenInput.shape[2] - 1.0) / 2.0)], 1)
 
     g = (backwarp_tenGrid[k] + tenFlow).permute(0, 2, 3, 1)
-    return torch.nn.functional.grid_sample(input=tenInput, grid=g, mode='bilinear', padding_mode='border', align_corners=True)
+    # MPS does not support padding_mode='border', use 'zeros' as fallback
+    _pad_mode = 'border' if tenInput.device.type == 'cuda' else 'zeros'
+    return torch.nn.functional.grid_sample(input=tenInput, grid=g, mode='bilinear', padding_mode=_pad_mode, align_corners=True)

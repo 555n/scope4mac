@@ -532,7 +532,7 @@ class T5EncoderModel:
     ):
         # Determine device if not provided: CUDA if available, CPU otherwise
         if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"))
 
         self.text_len = text_len
         self.dtype = dtype

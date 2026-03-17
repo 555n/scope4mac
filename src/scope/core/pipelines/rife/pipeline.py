@@ -42,11 +42,14 @@ class RIFEPipeline(Pipeline):
         """
         from .modules.interpolation import RIFEInterpolator
 
-        self.device = (
-            device
-            if device is not None
-            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        if device is not None:
+            self.device = device
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
         self.dtype = dtype
 
         # Initialize RIFE interpolator
@@ -55,7 +58,9 @@ class RIFEPipeline(Pipeline):
         logger.info("RIFE HDv3 model loaded successfully")
 
     def prepare(self, **kwargs) -> Requirements:
-        return Requirements(input_size=12)
+        # Accept 2 frames minimum (for frame-by-frame pipelines like turbo4mac)
+        # RIFE interpolates between consecutive frames to double FPS
+        return Requirements(input_size=2)
 
     def __call__(
         self,

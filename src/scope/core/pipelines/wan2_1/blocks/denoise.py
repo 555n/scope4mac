@@ -1,3 +1,5 @@
+import logging
+import time
 from typing import Any
 
 import torch
@@ -11,6 +13,8 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DenoiseBlock(ModularPipelineBlocks):
@@ -181,6 +185,7 @@ class DenoiseBlock(ModularPipelineBlocks):
                 * current_timestep
             )
 
+            step_start = time.perf_counter()
             if index < len(denoising_step_list) - 1:
                 _, denoised_pred = components.generator(
                     noisy_image_or_video=noise,
@@ -233,6 +238,15 @@ class DenoiseBlock(ModularPipelineBlocks):
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
                 )
+
+            logger.info(
+                "[PROFILE] denoise step=%s timestep=%s batch=%s frames=%s took=%.3fs",
+                index,
+                int(current_timestep),
+                batch_size,
+                num_frames,
+                time.perf_counter() - step_start,
+            )
 
         block_state.latents = denoised_pred
 

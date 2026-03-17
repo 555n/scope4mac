@@ -88,7 +88,7 @@ class WanDiffusionWrapper(torch.nn.Module):
                         torch.arange(max_seq_len),
                         1.0
                         / torch.pow(
-                            theta, torch.arange(0, dim, 2).to(torch.float64).div(dim)
+                            theta, torch.arange(0, dim, 2).to(torch.float32).div(dim)
                         ),
                     )
                     freqs = torch.polar(torch.ones_like(freqs), freqs)
@@ -151,7 +151,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         # use higher precision for calculations
         original_dtype = flow_pred.dtype
         flow_pred, xt, sigmas, timesteps = [
-            x.double().to(flow_pred.device)
+            x.float().to(flow_pred.device)
             for x in [flow_pred, xt, self.scheduler.sigmas, self.scheduler.timesteps]
         ]
 
@@ -177,7 +177,7 @@ class WanDiffusionWrapper(torch.nn.Module):
         # use higher precision for calculations
         original_dtype = x0_pred.dtype
         x0_pred, xt, sigmas, timesteps = [
-            x.double().to(x0_pred.device)
+            x.float().to(x0_pred.device)
             for x in [x0_pred, xt, scheduler.sigmas, scheduler.timesteps]
         ]
         timestep_id = torch.argmin(

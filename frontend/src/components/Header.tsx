@@ -3,8 +3,11 @@ import { Settings, Cloud, CloudOff, Plug } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
+import { MemoryGauge } from "./MemoryGauge";
+import { ChromeWing } from "./ChromeTribalOverlay";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import type { HardwareInfoResponse } from "../lib/api";
 
 interface HeaderProps {
   className?: string;
@@ -13,6 +16,9 @@ interface HeaderProps {
   // External settings tab control
   openSettingsTab?: string | null;
   onSettingsTabOpened?: () => void;
+  // Hardware info for memory gauge
+  hardwareInfo?: HardwareInfoResponse | null;
+  refreshHardwareInfo?: () => Promise<unknown>;
 }
 
 export function Header({
@@ -21,6 +27,8 @@ export function Header({
   cloudDisabled,
   openSettingsTab,
   onSettingsTabOpened,
+  hardwareInfo,
+  refreshHardwareInfo,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -128,9 +136,29 @@ export function Header({
   };
 
   return (
-    <header className={`w-full bg-background px-6 py-4 ${className}`}>
+    <header className={`w-full px-4 py-2 ${className}`} style={{ background: "transparent" }}>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-medium text-foreground">Daydream Scope</h1>
+        {/* Left spacer */}
+        <div className="flex-1" />
+
+        {/* Centre: Logo */}
+        <div className="flex items-center gap-1 justify-center">
+          <ChromeWing side="left" />
+          <img src="/happy-mac.svg" alt="Happy Mac" className="h-8 w-8" />
+          <h1 className="text-xl font-medium text-foreground">Scope4Mac</h1>
+          <ChromeWing side="right" />
+        </div>
+
+        {/* Right: controls in faux OS X window */}
+        <div className="flex items-center flex-1 justify-end">
+        {/* Right — controls in faux OS X window */}
+        <div className="flex items-center gap-2" style={{
+          background: "linear-gradient(180deg, rgba(200,200,210,0.85) 0%, rgba(180,180,195,0.8) 100%)",
+          borderRadius: 8,
+          padding: "4px 12px",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.6)",
+          border: "1px solid rgba(150,150,160,0.5)",
+        }}>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -184,6 +212,8 @@ export function Header({
           >
             <Settings className="h-5 w-5" />
           </Button>
+        </div>
+        </div>
         </div>
       </div>
 

@@ -74,7 +74,7 @@ const ServerLoading: React.FC<ServerLoadingProps> = ({ onComplete, onError }) =>
             color: 'hsl(0, 0%, 90%)',
             letterSpacing: '0.01em',
           }}>
-            Daydream Scope
+            Daydream Scope4Mac
           </h1>
           <div style={{
             fontSize: 16,
@@ -127,7 +127,7 @@ const ServerLoading: React.FC<ServerLoadingProps> = ({ onComplete, onError }) =>
           color: 'hsl(0, 0%, 90%)',
           letterSpacing: '0.01em',
         }}>
-          Daydream Scope
+          Daydream Scope4Mac
         </h1>
         <div style={{
           width: '100%',

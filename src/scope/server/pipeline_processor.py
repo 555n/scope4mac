@@ -437,6 +437,14 @@ class PipelineProcessor:
             if output is not None:
                 num_frames = output.shape[0]
 
+            logger.info(
+                "[PROFILE] pipeline=%s process_chunk input_mode=%s frames_out=%s took=%.3fs",
+                self.pipeline_id,
+                call_params.get("input_mode"),
+                num_frames,
+                processing_time,
+            )
+
             # Put each output port's frames to its queues (all frame ports are streamed)
             for port, value in output_dict.items():
                 if value is None or not isinstance(value, torch.Tensor):

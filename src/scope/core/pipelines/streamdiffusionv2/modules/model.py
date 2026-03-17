@@ -3,7 +3,10 @@
 import math
 
 import torch
-import torch.cuda.amp as amp
+try:
+    import torch.cuda.amp as amp
+except (ImportError, AttributeError, ModuleNotFoundError):
+    amp = None
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
@@ -17,7 +20,7 @@ def sinusoidal_embedding_1d(dim, position):
     # preprocess
     assert dim % 2 == 0
     half = dim // 2
-    position = position.type(torch.float64)
+    position = position.type(torch.float32)
 
     # calculation
     sinusoid = torch.outer(
@@ -32,7 +35,7 @@ def rope_params(max_seq_len, dim, theta=10000):
     assert dim % 2 == 0
     freqs = torch.outer(
         torch.arange(max_seq_len),
-        1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float64).div(dim)),
+        1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float32).div(dim)),
     )
     freqs = torch.polar(torch.ones_like(freqs), freqs)
     return freqs
@@ -52,7 +55,7 @@ def rope_apply(x, grid_sizes, freqs):
 
         # precompute multipliers
         x_i = torch.view_as_complex(
-            x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2)
+            x[i, :seq_len].to(torch.float32).reshape(seq_len, n, -1, 2)
         )
         freqs_i = torch.cat(
             [

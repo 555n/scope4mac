@@ -10,9 +10,7 @@ from .model import (
     MLPProj,
     sinusoidal_embedding_1d,
 )
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from torch.nn.attention.flex_attention import BlockMask
 from diffusers.models.modeling_utils import ModelMixin
 import torch.nn as nn
 import torch
@@ -20,12 +18,24 @@ import math
 
 from typing import Dict, Tuple
 
+_USE_FLEX_ATTENTION = torch.cuda.is_available()
+if _USE_FLEX_ATTENTION:
+    from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
+else:
+    # MPS/CPU fallback — flex_attention is CUDA-only
+    BlockMask = None
+    create_block_mask = None
+    flex_attention = None
+
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
 # change to default for other models
-flex_attention = torch.compile(
-    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
-)
+import sys as _sys
+if _USE_FLEX_ATTENTION:
+    _compile_mode = "max-autotune-no-cudagraphs" if torch.cuda.is_available() else "default"
+    flex_attention = torch.compile(
+        flex_attention, dynamic=False, mode=_compile_mode
+    )
 
 
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
@@ -42,7 +52,7 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
         # precompute multipliers
         x_i = torch.view_as_complex(
-            x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2)
+            x[i, :seq_len].to(torch.float32).reshape(seq_len, n, -1, 2)
         )
         freqs_i = torch.cat(
             [
@@ -293,12 +303,21 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1,
                 )
 
-                x = flex_attention(
-                    query=padded_roped_query.transpose(2, 1),
-                    key=padded_roped_key.transpose(2, 1),
-                    value=padded_v.transpose(2, 1),
-                    block_mask=block_mask,
-                )
+                if _USE_FLEX_ATTENTION:
+                    x = flex_attention(
+                        query=padded_roped_query.transpose(2, 1),
+                        key=padded_roped_key.transpose(2, 1),
+                        value=padded_v.transpose(2, 1),
+                        block_mask=block_mask,
+                    )
+                else:
+                    # MPS/CPU fallback: standard scaled dot product attention
+                    x = torch.nn.functional.scaled_dot_product_attention(
+                        padded_roped_query.transpose(2, 1),
+                        padded_roped_key.transpose(2, 1),
+                        padded_v.transpose(2, 1),
+                        is_causal=True,
+                    )
                 if padded_length > 0:
                     x = x[:, :, :-padded_length]
                 x = x.transpose(2, 1)
@@ -344,12 +363,21 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1,
                 )
 
-                x = flex_attention(
-                    query=padded_roped_query.transpose(2, 1),
-                    key=padded_roped_key.transpose(2, 1),
-                    value=padded_v.transpose(2, 1),
-                    block_mask=block_mask,
-                )
+                if _USE_FLEX_ATTENTION:
+                    x = flex_attention(
+                        query=padded_roped_query.transpose(2, 1),
+                        key=padded_roped_key.transpose(2, 1),
+                        value=padded_v.transpose(2, 1),
+                        block_mask=block_mask,
+                    )
+                else:
+                    # MPS/CPU fallback: standard scaled dot product attention
+                    x = torch.nn.functional.scaled_dot_product_attention(
+                        padded_roped_query.transpose(2, 1),
+                        padded_roped_key.transpose(2, 1),
+                        padded_v.transpose(2, 1),
+                        is_causal=True,
+                    )
                 if padded_length > 0:
                     x = x[:, :, :-padded_length]
                 x = x.transpose(2, 1)
@@ -977,7 +1005,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560,
         num_frame_per_block=1,
         local_attn_size=-1,
-    ) -> BlockMask:
+    ):
         """
         Prepare blockwise causal attention mask for video sequences.
 
@@ -989,12 +1017,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             local_attn_size: Local attention window size (-1 for global)
 
         Returns:
-            BlockMask for flex_attention
+            BlockMask for flex_attention, or None on MPS/CPU
 
         Note:
             The token sequence is divided into blocks: [1 latent frame] [1 latent frame] ...
             We use flexattention to construct the attention mask.
         """
+        if not _USE_FLEX_ATTENTION:
+            return None
+
         total_length = num_frames * frame_seqlen
 
         # we do right padding to get to a multiple of 128
@@ -1059,7 +1090,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         num_frames: int = 21,
         frame_seqlen: int = 1560,
         num_frame_per_block=1,
-    ) -> BlockMask:
+    ):
         """
         Prepare teacher forcing attention mask for training.
 
@@ -1070,12 +1101,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             num_frame_per_block: Number of frames per attention block
 
         Returns:
-            BlockMask for flex_attention
+            BlockMask for flex_attention, or None on MPS/CPU
 
         Note:
             The token sequence is divided into blocks: [1 latent frame] [1 latent frame] ...
             We use flexattention to construct the attention mask.
         """
+        if not _USE_FLEX_ATTENTION:
+            return None
+
         # # debug
         # DEBUG = False
         # if DEBUG:
@@ -1188,7 +1222,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560,
         num_frame_per_block=4,
         local_attn_size=-1,
-    ) -> BlockMask:
+    ):
         """
         Prepare blockwise causal attention mask for image-to-video generation.
 
@@ -1200,13 +1234,16 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             local_attn_size: Local attention window size (-1 for global)
 
         Returns:
-            BlockMask for flex_attention
+            BlockMask for flex_attention, or None on MPS/CPU
 
         Note:
             The token sequence is divided into blocks: [1 latent frame] [N latent frames] ...
             The first frame is separated out to support I2V generation.
             We use flexattention to construct the attention mask.
         """
+        if not _USE_FLEX_ATTENTION:
+            return None
+
         total_length = num_frames * frame_seqlen
 
         # we do right padding to get to a multiple of 128

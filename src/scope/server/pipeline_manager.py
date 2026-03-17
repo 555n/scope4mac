@@ -17,8 +17,29 @@ logger = logging.getLogger(__name__)
 
 
 def get_device() -> torch.device:
-    """Get the appropriate device (CUDA if available, CPU otherwise)."""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    """Get the appropriate device (CUDA → MPS → CPU)."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        import os
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.0")
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def _get_text_encoder_path() -> str:
+    """Get the appropriate text encoder path based on device.
+
+    MPS/CPU cannot handle fp8 dtype — use bf16 encoder instead.
+    """
+    from .models_config import get_model_file_path
+
+    if get_device().type == "cuda":
+        return str(get_model_file_path("WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"))
+    else:
+        # BF16 encoder for MPS/CPU — fp8 not supported on Apple Silicon
+        return str(get_model_file_path("Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth"))
 
 
 class PipelineNotAvailableException(Exception):
@@ -857,11 +878,7 @@ class PipelineManager:
                             "StreamDiffusionV2/wan_causal_dmd_v2v/model.pt"
                         )
                     ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
+                    "text_encoder_path": _get_text_encoder_path(),
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
@@ -894,8 +911,8 @@ class PipelineManager:
             pipeline = StreamDiffusionV2Pipeline(
                 config,
                 quantization=quantization,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
+                device=get_device(),
+                dtype=torch.bfloat16 if get_device().type == "cuda" else torch.float16,
                 stage_callback=stage_callback,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
@@ -949,11 +966,7 @@ class PipelineManager:
                     "lora_path": str(
                         get_model_file_path("LongLive-1.3B/models/lora.pt")
                     ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
+                    "text_encoder_path": _get_text_encoder_path(),
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
@@ -985,8 +998,8 @@ class PipelineManager:
             pipeline = LongLivePipeline(
                 config,
                 quantization=quantization,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
+                device=get_device(),
+                dtype=torch.bfloat16 if get_device().type == "cuda" else torch.float16,
                 stage_callback=stage_callback,
             )
             logger.info("LongLive pipeline initialized")
@@ -1007,11 +1020,7 @@ class PipelineManager:
                             "krea-realtime-video/krea-realtime-video-14b.safetensors"
                         )
                     ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
+                    "text_encoder_path": _get_text_encoder_path(),
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
@@ -1056,16 +1065,20 @@ class PipelineManager:
             if load_params:
                 quantization = load_params.get("quantization", None)
 
+            _dev = get_device()
             pipeline = KreaRealtimeVideoPipeline(
                 config,
                 quantization=quantization,
                 # Only compile diffusion model for hopper right now
-                compile=any(
-                    x in torch.cuda.get_device_name(0).lower()
-                    for x in ("h100", "hopper")
+                compile=(
+                    torch.cuda.is_available()
+                    and any(
+                        x in torch.cuda.get_device_name(0).lower()
+                        for x in ("h100", "hopper")
+                    )
                 ),
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
+                device=_dev,
+                dtype=torch.bfloat16 if _dev.type == "cuda" else torch.float16,
                 stage_callback=stage_callback,
             )
             logger.info("krea-realtime-video pipeline initialized")
@@ -1084,11 +1097,7 @@ class PipelineManager:
                     "generator_path": str(
                         get_model_file_path("Reward-Forcing-T2V-1.3B/rewardforcing.pt")
                     ),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
+                    "text_encoder_path": _get_text_encoder_path(),
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
@@ -1123,8 +1132,8 @@ class PipelineManager:
             pipeline = RewardForcingPipeline(
                 config,
                 quantization=quantization,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
+                device=get_device(),
+                dtype=torch.bfloat16 if get_device().type == "cuda" else torch.float16,
                 stage_callback=stage_callback,
             )
             logger.info("RewardForcing pipeline initialized")
@@ -1143,11 +1152,7 @@ class PipelineManager:
                     "model_dir": str(models_dir),
                     "generator_path": str(get_model_file_path("MemFlow/base.pt")),
                     "lora_path": str(get_model_file_path("MemFlow/lora.pt")),
-                    "text_encoder_path": str(
-                        get_model_file_path(
-                            "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
-                        )
-                    ),
+                    "text_encoder_path": _get_text_encoder_path(),
                     "tokenizer_path": str(
                         get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
                     ),
@@ -1179,8 +1184,8 @@ class PipelineManager:
             pipeline = MemFlowPipeline(
                 config,
                 quantization=quantization,
-                device=torch.device("cuda"),
-                dtype=torch.bfloat16,
+                device=get_device(),
+                dtype=torch.bfloat16 if get_device().type == "cuda" else torch.float16,
                 stage_callback=stage_callback,
             )
             logger.info("MemFlow pipeline initialized")
@@ -1218,7 +1223,7 @@ class PipelineManager:
 
             pipeline = VideoDepthAnythingPipeline(
                 config,
-                device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                device=get_device(),
                 dtype=torch.float16,
             )
             logger.info("VideoDepthAnything pipeline initialized")

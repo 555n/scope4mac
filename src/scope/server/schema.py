@@ -256,6 +256,10 @@ class HardwareInfoResponse(BaseModel):
     vram_gb: float | None = Field(
         default=None, description="Total VRAM in GB (None if CUDA not available)"
     )
+    mps_allocated_gb: float | None = Field(
+        default=None,
+        description="Current MPS memory allocated in GB (None if MPS not available)",
+    )
     spout_available: bool = Field(
         default=False,
         description="Whether Spout is available (Windows only, not WSL)",

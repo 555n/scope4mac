@@ -110,7 +110,7 @@ const Setup: React.FC<SetupProps> = ({ onComplete }) => {
           color: 'hsl(0, 0%, 90%)',
           letterSpacing: '0.01em',
         }}>
-          Daydream Scope
+          Daydream Scope4Mac
         </h1>
         <div style={{
           width: '100%',

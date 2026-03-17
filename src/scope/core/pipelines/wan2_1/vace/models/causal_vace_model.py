@@ -266,11 +266,12 @@ class CausalVaceWanModel(nn.Module):
             new_blocks.append(new_block)
 
             # Clear CUDA cache periodically to help with fragmentation
-            if i % 10 == 0:
+            if i % 10 == 0 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
         # Final cache clear
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Replace blocks in wrapped model
         self.causal_wan_model.blocks = new_blocks

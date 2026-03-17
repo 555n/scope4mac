@@ -427,9 +427,10 @@ class FrameProcessor:
             try:
                 frame = self._sink_processor.output_queue.get_nowait()
                 # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
-                # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
+                # Move to CPU here for WebRTC/headless streaming (frames stay on-device
+                # between pipeline processors, but VideoFrame/NumPy conversion is host-only).
                 frame = frame.squeeze(0)
-                if frame.is_cuda:
+                if frame.device.type != "cpu":
                     frame = frame.cpu()
             except queue.Empty:
                 return None
@@ -857,33 +858,25 @@ class FrameProcessor:
             self.input_source = None
 
     def _input_source_receiver_loop(self):
-        """Background thread that receives frames from a generic input source."""
+        """Background thread that receives frames from a generic input source.
+
+        Receives frames as fast as the source provides them, without throttling
+        based on pipeline FPS. Backpressure is handled by the downstream queues
+        (put_nowait drops frames when full). This matches the behavior of the
+        WebRTC camera input path and avoids a feedback loop where FPS-based
+        throttling + receive latency causes a downward FPS spiral for sources
+        with non-trivial receive overhead (NDI, Syphon).
+        """
         logger.info(f"Input source thread started ({self.input_source_type})")
 
-        target_fps = self.get_fps()
-        frame_interval = 1.0 / target_fps
-        last_frame_time = 0.0
         frame_count = 0
 
         while (
             self.running and self.input_source_enabled and self.input_source is not None
         ):
             try:
-                current_pipeline_fps = self.get_fps()
-                if current_pipeline_fps > 0:
-                    target_fps = current_pipeline_fps
-                    frame_interval = 1.0 / target_fps
-
-                current_time = time.time()
-                time_since_last = current_time - last_frame_time
-                if time_since_last < frame_interval:
-                    time.sleep(frame_interval - time_since_last)
-                    continue
-
                 rgb_frame = self.input_source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
-                    last_frame_time = time.time()
-
                     if self._cloud_mode:
                         if self._video_mode and self.cloud_manager:
                             if self.cloud_manager.send_frame(rgb_frame):

@@ -188,7 +188,9 @@ class WanVAEWrapper(torch.nn.Module):
         """
         # [batch, frames, channels, h, w] -> [batch, channels, frames, h, w]
         zs = latent.permute(0, 2, 1, 3, 4)
-        zs = zs.to(torch.bfloat16).to("cuda")
+        # Use bfloat16 on CUDA, float16 on MPS (bfloat16 has limited MPS support)
+        _vae_dtype = torch.bfloat16 if latent.device.type == "cuda" else torch.float16
+        zs = zs.to(_vae_dtype).to(latent.device)
 
         device, dtype = latent.device, latent.dtype
         scale = self._get_scale(device, dtype)

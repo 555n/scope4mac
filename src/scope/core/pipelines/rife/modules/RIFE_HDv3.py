@@ -12,7 +12,7 @@ from torch.optim import AdamW
 from .IFNet_HDv3 import IFNet
 from .loss import EPE, SOBEL
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"))
 
 
 class Model(nn.Module):
@@ -48,11 +48,7 @@ class Model(nn.Module):
         if rank > 0:
             return
 
-        raw = (
-            torch.load(f"{path}/flownet.pkl")
-            if torch.cuda.is_available()
-            else torch.load(f"{path}/flownet.pkl", map_location="cpu")
-        )
+        raw = torch.load(f"{path}/flownet.pkl", map_location="cpu", weights_only=False)
         state_dict = convert(raw)
 
         # Filter out unexpected keys (teacher.*, caltime.*, etc.) to avoid strict load errors
@@ -63,6 +59,8 @@ class Model(nn.Module):
             print(f"[RIFE] Ignoring {len(unexpected)} unexpected keys: {unexpected[:3]}...")
 
         self.flownet.load_state_dict(filtered, strict=False)
+        # Ensure model is on the correct device after loading
+        self.flownet.to(device)
 
     def save_model(self, path, rank=0):
         if rank == 0:

@@ -19,6 +19,12 @@ UMT5_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
     files=["config.json", "umt5-xxl-enc-fp8_e4m3fn.safetensors"],
 )
 
+# BF16 text encoder for MPS/CPU (FP8 not supported on Apple Silicon)
+UMT5_ENCODER_BF16_ARTIFACT = HuggingfaceRepoArtifact(
+    repo_id="daydreamlive/Wan2.1-T2V-1.3B",
+    files=["models_t5_umt5-xxl-enc-bf16.pth"],
+)
+
 VACE_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="daydreamlive/WanVideo_comfy",
     files=["Wan2_1-VACE_module_1_3B_bf16.safetensors"],

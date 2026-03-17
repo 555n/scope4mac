@@ -52,7 +52,7 @@ class OpticalFlowPipeline(Pipeline):
         self.device = (
             device
             if device is not None
-            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            else torch.device("cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"))
         )
         self._height = DEFAULT_HEIGHT
         self._width = DEFAULT_WIDTH
@@ -96,8 +96,12 @@ class OpticalFlowPipeline(Pipeline):
         model, _ = load_raft_model(self._use_large_model, device=str(self.device))
 
         # Compile the model for optimized inference
-        logger.info(f"Compiling RAFT {model_size} model with torch.compile...")
-        self._pytorch_model = torch.compile(model, backend="inductor", fullgraph=False)
+        if torch.cuda.is_available():
+            logger.info(f"Compiling RAFT {model_size} model with torch.compile...")
+            self._pytorch_model = torch.compile(model, backend="inductor", fullgraph=False)
+        else:
+            logger.info(f"Skipping torch.compile for RAFT {model_size} on MPS/CPU")
+            self._pytorch_model = model
 
         logger.info(
             f"Loaded and compiled RAFT {model_size} model in {time.time() - start:.3f}s"

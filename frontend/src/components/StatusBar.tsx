@@ -1,4 +1,6 @@
 import { Terminal } from "lucide-react";
+import { MemoryGauge } from "./MemoryGauge";
+import type { HardwareInfoResponse } from "../lib/api";
 
 interface StatusBarProps {
   className?: string;
@@ -7,6 +9,8 @@ interface StatusBarProps {
   onLogToggle?: () => void;
   isLogOpen?: boolean;
   logUnreadCount?: number;
+  hardwareInfo?: HardwareInfoResponse | null;
+  refreshHardwareInfo?: () => Promise<unknown>;
 }
 
 export function StatusBar({
@@ -16,6 +20,8 @@ export function StatusBar({
   onLogToggle,
   isLogOpen,
   logUnreadCount = 0,
+  hardwareInfo,
+  refreshHardwareInfo,
 }: StatusBarProps) {
   const MetricItem = ({
     label,
@@ -75,10 +81,16 @@ export function StatusBar({
         )}
       </div>
 
-      {/* Right: Metrics */}
-      <div className="flex items-center gap-6 ml-auto">
+      {/* Centre: Memory gauge */}
+      <div className="flex items-center justify-center flex-1">
+        <MemoryGauge hardwareInfo={hardwareInfo ?? null} refreshHardwareInfo={refreshHardwareInfo} />
+      </div>
+
+      {/* Right: Metrics + version */}
+      <div className="flex items-center gap-6">
         <MetricItem label="FPS" value={fpsValue} />
         <MetricItem label="Bitrate" value={bitrateValue} />
+        <span className="text-[10px] text-muted-foreground font-mono opacity-60">v0.6.0-mac</span>
       </div>
     </div>
   );

@@ -175,6 +175,7 @@ class StartStreamRequest(BaseModel):
     input_mode: str = "text"
     prompts: list[dict] | None = None
     input_source: dict | None = None
+    parameters: dict | None = None
 
 
 @router.post("/session/start")
@@ -201,6 +202,8 @@ async def start_stream(
         initial_params["prompts"] = request.prompts
     if request.input_source is not None:
         initial_params["input_source"] = request.input_source
+    if request.parameters is not None:
+        initial_params.update(request.parameters)
 
     try:
         frame_processor = FrameProcessor(

@@ -38,6 +38,20 @@ class WanTextEncoderWrapper(torch.nn.Module):
         # Load weights first, then create model with those weights
         state_dict = load_state_dict(text_encoder_path)
 
+        # Cast unsupported MPS dtypes up front so the encoder runs entirely in fp16.
+        _is_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        if _is_mps or not torch.cuda.is_available():
+            _target_dtype = torch.float16
+            for key in state_dict:
+                if state_dict[key].dtype in (
+                    torch.bfloat16,
+                    torch.float8_e4m3fn,
+                    torch.float8_e5m2,
+                    torch.float8_e4m3fnuz,
+                    torch.float8_e5m2fnuz,
+                ):
+                    state_dict[key] = state_dict[key].to(_target_dtype)
+
         # Create model with meta device for fast initialization
         with torch.device("meta"):
             self.text_encoder = (

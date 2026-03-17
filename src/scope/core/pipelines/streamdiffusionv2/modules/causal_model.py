@@ -10,19 +10,29 @@ from .model import (
     MLPProj,
     sinusoidal_embedding_1d,
 )
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from torch.nn.attention.flex_attention import BlockMask
 from diffusers.models.modeling_utils import ModelMixin
 import torch.nn as nn
 import torch
 import math
 
+_USE_FLEX_ATTENTION = torch.cuda.is_available()
+if _USE_FLEX_ATTENTION:
+    from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
+else:
+    # MPS/CPU fallback — flex_attention is CUDA-only
+    BlockMask = None
+    create_block_mask = None
+    flex_attention = None
+
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
 # change to default for other models
 # Changed from max-autotune to max-autotune-no-cudagraphs because max-autotune did not play well with VACE code.
-flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+import sys as _sys
+if _USE_FLEX_ATTENTION:
+    _compile_mode = "max-autotune-no-cudagraphs" if torch.cuda.is_available() else "default"
+    flex_attention = torch.compile(flex_attention, dynamic=False, mode=_compile_mode)
 
 
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
@@ -39,7 +49,7 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
         # precompute multipliers
         x_i = torch.view_as_complex(
-            x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2)
+            x[i, :seq_len].to(torch.float32).reshape(seq_len, n, -1, 2)
         )
         freqs_i = torch.cat(
             [
@@ -152,12 +162,21 @@ class CausalWanSelfAttention(nn.Module):
                 dim=1,
             )
 
-            attn_out = flex_attention(
-                query=padded_roped_query.transpose(2, 1),
-                key=padded_roped_key.transpose(2, 1),
-                value=padded_v.transpose(2, 1),
-                block_mask=block_mask,
-            )
+            if _USE_FLEX_ATTENTION:
+                attn_out = flex_attention(
+                    query=padded_roped_query.transpose(2, 1),
+                    key=padded_roped_key.transpose(2, 1),
+                    value=padded_v.transpose(2, 1),
+                    block_mask=block_mask,
+                )
+            else:
+                # MPS/CPU fallback: standard scaled dot product attention
+                attn_out = torch.nn.functional.scaled_dot_product_attention(
+                    padded_roped_query.transpose(2, 1),
+                    padded_roped_key.transpose(2, 1),
+                    padded_v.transpose(2, 1),
+                    is_causal=True,
+                )
             if padded_length > 0:
                 attn_out = attn_out[:, :, :-padded_length]
             x = attn_out.transpose(2, 1)
@@ -549,12 +568,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         num_frames: int = 21,
         frame_seqlen: int = 1560,
         num_frame_per_block=1,
-    ) -> BlockMask:
+    ):
         """
         we will divide the token sequence into the following format
         [1 latent frame] [1 latent frame] ... [1 latent frame]
         We use flexattention to construct the attention mask
         """
+        if not _USE_FLEX_ATTENTION:
+            return None
+
         total_length = num_frames * frame_seqlen
 
         # we do right padding to get to a multiple of 128

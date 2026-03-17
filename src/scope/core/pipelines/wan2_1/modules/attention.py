@@ -3,57 +3,70 @@
 import platform
 
 import torch
-from flash_attn import flash_attn_func
 
+# --- Flash Attention: conditional import (not available on macOS/MPS) ---
+flash_attn_func = None
+
+def _is_cuda_available():
+    return torch.cuda.is_available()
 
 def is_hopper_gpu():
-    if not torch.cuda.is_available():
+    if not _is_cuda_available():
         return False
     device_name = torch.cuda.get_device_name(0).lower()
     return "h100" in device_name or "hopper" in device_name
 
 def is_b200_gpu():
-    if not torch.cuda.is_available():
+    if not _is_cuda_available():
         return False
     device_name = torch.cuda.get_device_name(0).lower()
     return "b200" in device_name
 
 FLASH_ATTN_3_AVAILABLE = False
 
-try:
-    import flash_attn_interface
-
-    FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
-except ModuleNotFoundError:
-    pass
-
-if not FLASH_ATTN_3_AVAILABLE and platform.system() != "Windows":
+if _is_cuda_available():
     try:
-        from kernels import get_kernel
-
-        flash_attn_3_hub = get_kernel(
-            "kernels-community/flash-attn3", revision="fake-ops-return-probs"
-        )
-        flash_attn_interface = flash_attn_3_hub
-        FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
-    except Exception:
+        from flash_attn import flash_attn_func as _fa_func
+        flash_attn_func = _fa_func
+    except (ModuleNotFoundError, ImportError):
         pass
 
-try:
-    import flash_attn
+    try:
+        import flash_attn_interface
 
-    FLASH_ATTN_2_AVAILABLE = True
-except ModuleNotFoundError:
-    FLASH_ATTN_2_AVAILABLE = False
+        FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
+    except ModuleNotFoundError:
+        pass
+
+    if not FLASH_ATTN_3_AVAILABLE and platform.system() != "Windows":
+        try:
+            from kernels import get_kernel
+
+            flash_attn_3_hub = get_kernel(
+                "kernels-community/flash-attn3", revision="fake-ops-return-probs"
+            )
+            flash_attn_interface = flash_attn_3_hub
+            FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
+        except Exception:
+            pass
+
+FLASH_ATTN_2_AVAILABLE = False
+if _is_cuda_available():
+    try:
+        import flash_attn
+
+        FLASH_ATTN_2_AVAILABLE = True
+    except ModuleNotFoundError:
+        pass
 
 sageattn_func = None
 SAGEATTN_AVAILABLE = False
-# Do not try to load SageAttention on Hopper GPUs because at the moment
-# loading SageAttention 2.2.0 in the sage module causes static on a H100
-# Do not try to load SageAttention on B200 GPUs because at the moment
-# SageAttention 2.2.0 is not supported on B200 GPUs
-if not is_hopper_gpu() and not is_b200_gpu():
-    from .sage import SAGEATTN_AVAILABLE, sageattn_func
+# SageAttention: CUDA-only, skip on macOS/MPS
+if _is_cuda_available() and not is_hopper_gpu() and not is_b200_gpu():
+    try:
+        from .sage import SAGEATTN_AVAILABLE, sageattn_func
+    except (ImportError, ModuleNotFoundError):
+        pass
 
 import warnings
 
@@ -67,6 +80,19 @@ __all__ = [
 print("flash attn 2 available", FLASH_ATTN_2_AVAILABLE)
 print("flash attn 3 available", FLASH_ATTN_3_AVAILABLE)
 print("sage attn available", SAGEATTN_AVAILABLE)
+
+
+def _resolve_sdpa_dtype(
+    tensor: torch.Tensor,
+    requested_dtype: torch.dtype,
+) -> torch.dtype:
+    """Pick an attention dtype that is safe on the active backend."""
+    device_type = tensor.device.type
+    if device_type == "mps":
+        return torch.float16
+    if device_type == "cpu" and requested_dtype in (torch.float16, torch.bfloat16):
+        return torch.float32
+    return requested_dtype
 
 
 def flash_attention(
@@ -98,11 +124,12 @@ def flash_attention(
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
     if not FLASH_ATTN_3_AVAILABLE:
-        return flash_attn_func(
-            q,
-            k,
-            v,
-        )
+        if flash_attn_func is not None:
+            return flash_attn_func(q, k, v)
+        # Fallback to SDPA for non-CUDA (MPS/CPU)
+        return attention(q=q, k=k, v=v, q_lens=q_lens, k_lens=k_lens,
+                        dropout_p=dropout_p, softmax_scale=softmax_scale,
+                        q_scale=q_scale, causal=causal, dtype=dtype)
     half_dtypes = (torch.float16, torch.bfloat16)
     assert dtype in half_dtypes
     assert q.device.type == "cuda" and q.size(-1) <= 256
@@ -204,14 +231,16 @@ def attention(
     fa_version=None,
     # og_dtype=torch.bfloat16,
 ):
+    resolved_dtype = _resolve_sdpa_dtype(q, dtype)
+
     if SAGEATTN_AVAILABLE:
         # print("Using sageattention")
         attn_mask = None
 
         og_dtype = q.dtype
-        q = q.transpose(1, 2).to(dtype)
-        k = k.transpose(1, 2).to(dtype)
-        v = v.transpose(1, 2).to(dtype)
+        q = q.transpose(1, 2).to(resolved_dtype)
+        k = k.transpose(1, 2).to(resolved_dtype)
+        v = v.transpose(1, 2).to(resolved_dtype)
 
         out = sageattn_func(
             q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p
@@ -243,9 +272,9 @@ def attention(
             )
         attn_mask = None
 
-        q = q.transpose(1, 2).to(dtype)
-        k = k.transpose(1, 2).to(dtype)
-        v = v.transpose(1, 2).to(dtype)
+        q = q.transpose(1, 2).to(resolved_dtype)
+        k = k.transpose(1, 2).to(resolved_dtype)
+        v = v.transpose(1, 2).to(resolved_dtype)
 
         out = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p

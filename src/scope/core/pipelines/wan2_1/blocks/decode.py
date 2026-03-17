@@ -1,3 +1,5 @@
+import logging
+import time
 from typing import Any
 
 import torch
@@ -10,6 +12,8 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     InputParam,
     OutputParam,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DecodeBlock(ModularPipelineBlocks):
@@ -49,7 +53,14 @@ class DecodeBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         # Decode to pixel space
+        decode_start = time.perf_counter()
         video = components.vae.decode_to_pixel(block_state.latents, use_cache=True)
+        logger.info(
+            "[PROFILE] decode frames=%s latent_shape=%s took=%.3fs",
+            video.shape[1] if video.ndim >= 2 else 0,
+            tuple(block_state.latents.shape),
+            time.perf_counter() - decode_start,
+        )
 
         block_state.output_video = video
 

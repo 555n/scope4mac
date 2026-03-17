@@ -39,7 +39,7 @@
     ; Initialize log file
     StrCpy $R8 "$1\logs\installer.log"
     FileOpen $R9 $R8 "w"
-    FileWrite $R9 "=== Daydream Scope Installer Log ===$\r$\n"
+    FileWrite $R9 "=== Daydream Scope4Mac Installer Log ===$\r$\n"
     FileClose $R9
     !insertmacro WriteLogWithTime "Installer started"
 

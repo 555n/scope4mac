@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "../components/Header";
+import { ChromeTribalOverlay } from "../components/ChromeTribalOverlay";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
@@ -151,6 +152,7 @@ export function StreamPage() {
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    hardwareInfo,
     skipNextModeReset,
   } = useStreamState();
 
@@ -2007,13 +2009,18 @@ export function StreamPage() {
       onPromptWeightChange={handleMidiPromptWeightChange}
       onPlayPauseToggle={handlePlayPauseToggle}
     >
-      <div className="h-screen flex flex-col bg-background">
+      <div className="h-screen flex flex-col">
+        {/* Y2K Chrome Tribal Decorations */}
+        <ChromeTribalOverlay />
+
         {/* Header */}
         <Header
           onPipelinesRefresh={handlePipelinesRefresh}
           cloudDisabled={isStreaming}
           openSettingsTab={openSettingsTab}
           onSettingsTabOpened={() => setOpenSettingsTab(null)}
+          hardwareInfo={hardwareInfo}
+          refreshHardwareInfo={refreshHardwareInfo}
         />
 
         {/* Main Content Area */}
@@ -2408,6 +2415,8 @@ export function StreamPage() {
           onLogToggle={toggleLogPanel}
           isLogOpen={isLogPanelOpen}
           logUnreadCount={logUnreadCount}
+          hardwareInfo={hardwareInfo}
+          refreshHardwareInfo={refreshHardwareInfo}
         />
 
         {/* Download Dialog */}

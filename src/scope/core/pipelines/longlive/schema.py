@@ -7,6 +7,7 @@ from ..common_artifacts import (
     LIGHTVAE_ARTIFACT,
     TAE_ARTIFACT,
     UMT5_ENCODER_ARTIFACT,
+    UMT5_ENCODER_BF16_ARTIFACT,
     VACE_ARTIFACT,
     WAN_1_3B_ARTIFACT,
 )
@@ -29,6 +30,7 @@ class LongLiveConfig(BasePipelineConfig):
     artifacts = [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        UMT5_ENCODER_BF16_ARTIFACT,
         VACE_ARTIFACT,
         LIGHTVAE_ARTIFACT,
         TAE_ARTIFACT,
@@ -130,12 +132,12 @@ class LongLiveConfig(BasePipelineConfig):
     )
 
     modes = {
-        "text": ModeDefaults(default=True),
+        "text": ModeDefaults(default=True, denoising_steps=[1000]),
         "video": ModeDefaults(
-            height=512,
-            width=512,
+            height=320,
+            width=320,
             noise_scale=0.7,
             noise_controller=True,
-            denoising_steps=[1000, 750],
+            denoising_steps=[1000],
         ),
     }

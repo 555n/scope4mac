@@ -138,6 +138,7 @@ export const loadPipeline = async (
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
+    signal: AbortSignal.timeout(300000), // 5 min timeout for large models (Krea 14B)
   });
 
   if (!response.ok) {
@@ -213,6 +214,7 @@ export const downloadPipelineModels = async (
 
 export interface HardwareInfoResponse {
   vram_gb: number | null;
+  mps_allocated_gb: number | null;
   spout_available: boolean;
   ndi_available: boolean;
   syphon_available: boolean;

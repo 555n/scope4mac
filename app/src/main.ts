@@ -203,7 +203,7 @@ if (process.defaultApp) {
 }
 
 // Set FriendlyAppName in registry so Windows/Chromium protocol handler dialogs
-// show "Daydream Scope" instead of the exe's cached FileDescription
+// show "Daydream Scope4Mac" instead of the exe's cached FileDescription
 if (process.platform === 'win32') {
   try {
     execSync(

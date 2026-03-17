@@ -7,6 +7,7 @@ from ..common_artifacts import (
     LIGHTVAE_ARTIFACT,
     TAE_ARTIFACT,
     UMT5_ENCODER_ARTIFACT,
+    UMT5_ENCODER_BF16_ARTIFACT,
     VACE_ARTIFACT,
     WAN_1_3B_ARTIFACT,
 )
@@ -29,6 +30,7 @@ class MemFlowConfig(BasePipelineConfig):
     artifacts = [
         WAN_1_3B_ARTIFACT,
         UMT5_ENCODER_ARTIFACT,
+        UMT5_ENCODER_BF16_ARTIFACT,
         VACE_ARTIFACT,
         LIGHTVAE_ARTIFACT,
         TAE_ARTIFACT,

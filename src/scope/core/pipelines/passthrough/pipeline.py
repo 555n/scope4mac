@@ -30,7 +30,7 @@ class PassthroughPipeline(Pipeline):
         self.device = (
             device
             if device is not None
-            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            else torch.device("cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"))
         )
         self.dtype = dtype
         self.prompts = None

@@ -6,11 +6,18 @@ import torch
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
-from torch.nn.attention.flex_attention import (
-    BlockMask,
-    create_block_mask,
-    flex_attention,
-)
+_USE_FLEX_ATTENTION = torch.cuda.is_available()
+if _USE_FLEX_ATTENTION:
+    from torch.nn.attention.flex_attention import (
+        BlockMask,
+        create_block_mask,
+        flex_attention,
+    )
+else:
+    # MPS/CPU fallback — flex_attention is CUDA-only
+    BlockMask = None
+    create_block_mask = None
+    flex_attention = None
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
 from .model import (
@@ -23,9 +30,12 @@ from .model import (
     sinusoidal_embedding_1d,
 )
 
-flex_attention = torch.compile(
-    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
-)
+import sys as _sys
+if _USE_FLEX_ATTENTION:
+    _compile_mode = "max-autotune-no-cudagraphs" if torch.cuda.is_available() else "default"
+    flex_attention = torch.compile(
+        flex_attention, dynamic=False, mode=_compile_mode
+    )
 
 # Constants for flex_attention operations
 FLEX_ATTENTION_ALIGNMENT = 128
@@ -51,7 +61,7 @@ def _pad_tensor_for_flex_attention(
 
 def rope_params_riflex(max_seq_len, dim, theta=10000, k=0, L_test=None):
     assert dim % 2 == 0
-    omega = 1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float64).div(dim))
+    omega = 1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float32).div(dim))
     if k is not None:
         print("Doing riflex w/ ltest", L_test)
         omega[k - 1] = 0.9 * 2 * torch.pi / L_test
@@ -143,6 +153,9 @@ def get_block_mask(
     num_frame_per_block=3,
     local_attn_size=-1,
 ):
+    if not _USE_FLEX_ATTENTION:
+        return None
+
     total_length = num_frames * frame_seqlen
 
     # we do right padding to get to a multiple of 128
@@ -198,7 +211,7 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
         # precompute multipliers
         x_i = torch.view_as_complex(
-            x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2)
+            x[i, :seq_len].to(torch.float32).reshape(seq_len, n, -1, 2)
         )
         freqs_i = torch.cat(
             [
@@ -368,12 +381,21 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1,
                 )
 
-                attn_out = flex_attention(
-                    query=padded_roped_query.transpose(2, 1),
-                    key=padded_roped_key.transpose(2, 1),
-                    value=padded_v.transpose(2, 1),
-                    block_mask=block_mask,
-                )
+                if _USE_FLEX_ATTENTION:
+                    attn_out = flex_attention(
+                        query=padded_roped_query.transpose(2, 1),
+                        key=padded_roped_key.transpose(2, 1),
+                        value=padded_v.transpose(2, 1),
+                        block_mask=block_mask,
+                    )
+                else:
+                    # MPS/CPU fallback: standard scaled dot product attention
+                    attn_out = torch.nn.functional.scaled_dot_product_attention(
+                        padded_roped_query.transpose(2, 1),
+                        padded_roped_key.transpose(2, 1),
+                        padded_v.transpose(2, 1),
+                        is_causal=True,
+                    )
                 if padded_length > 0:
                     attn_out = attn_out[:, :, :-padded_length]
                 x = attn_out.transpose(2, 1)
@@ -429,15 +451,24 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1,
                 )
 
-                attn_out = flex_attention(
-                    query=padded_roped_query.transpose(2, 1).contiguous(),
-                    key=padded_roped_key.transpose(2, 1).contiguous(),
-                    value=padded_v.transpose(2, 1).contiguous(),
-                    block_mask=block_mask,
-                    kernel_options={
-                        "BLOCKS_ARE_CONTIGUOUS": True,
-                    },
-                )
+                if _USE_FLEX_ATTENTION:
+                    attn_out = flex_attention(
+                        query=padded_roped_query.transpose(2, 1).contiguous(),
+                        key=padded_roped_key.transpose(2, 1).contiguous(),
+                        value=padded_v.transpose(2, 1).contiguous(),
+                        block_mask=block_mask,
+                        kernel_options={
+                            "BLOCKS_ARE_CONTIGUOUS": True,
+                        },
+                    )
+                else:
+                    # MPS/CPU fallback: standard scaled dot product attention
+                    attn_out = torch.nn.functional.scaled_dot_product_attention(
+                        padded_roped_query.transpose(2, 1).contiguous(),
+                        padded_roped_key.transpose(2, 1).contiguous(),
+                        padded_v.transpose(2, 1).contiguous(),
+                        is_causal=True,
+                    )
                 if padded_length > 0:
                     attn_out = attn_out[:, :, :-padded_length]
                 x = attn_out.transpose(2, 1)
@@ -562,12 +593,20 @@ class CausalWanSelfAttention(nn.Module):
                         score,
                     )
 
-                x = flex_attention(
-                    query=padded_roped_query.transpose(2, 1).contiguous(),
-                    key=padded_k.transpose(2, 1).contiguous(),
-                    value=padded_v.transpose(2, 1).contiguous(),
-                    score_mod=score_mod,
-                )[:, :, :q_len].transpose(2, 1)
+                if _USE_FLEX_ATTENTION:
+                    x = flex_attention(
+                        query=padded_roped_query.transpose(2, 1).contiguous(),
+                        key=padded_k.transpose(2, 1).contiguous(),
+                        value=padded_v.transpose(2, 1).contiguous(),
+                        score_mod=score_mod,
+                    )[:, :, :q_len].transpose(2, 1)
+                else:
+                    # MPS/CPU fallback: standard scaled dot product attention (no score_mod support)
+                    x = torch.nn.functional.scaled_dot_product_attention(
+                        padded_roped_query.transpose(2, 1).contiguous(),
+                        padded_k.transpose(2, 1).contiguous(),
+                        padded_v.transpose(2, 1).contiguous(),
+                    )[:, :, :q_len].transpose(2, 1)
             else:
                 # Use original Flash/Sage Attention path when bias is disabled (1.0)
                 # This preserves the original behavior and avoids flex_attention overhead
@@ -892,7 +931,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560,
         num_frame_per_block=1,
         local_attn_size=-1,
-    ) -> BlockMask:
+    ):
         """
         we will divide the token sequence into the following format
         [1 latent frame] [1 latent frame] ... [1 latent frame]
@@ -909,12 +948,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         num_frames: int = 21,
         frame_seqlen: int = 1560,
         num_frame_per_block=1,
-    ) -> BlockMask:
+    ):
         """
         we will divide the token sequence into the following format
         [1 latent frame] [1 latent frame] ... [1 latent frame]
         We use flexattention to construct the attention mask
         """
+        if not _USE_FLEX_ATTENTION:
+            return None
+
         # debug
         DEBUG = False
         if DEBUG:
@@ -1035,13 +1077,16 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         frame_seqlen: int = 1560,
         num_frame_per_block=4,
         local_attn_size=-1,
-    ) -> BlockMask:
+    ):
         """
         we will divide the token sequence into the following format
         [1 latent frame] [N latent frame] ... [N latent frame]
         The first frame is separated out to support I2V generation
         We use flexattention to construct the attention mask
         """
+        if not _USE_FLEX_ATTENTION:
+            return None
+
         total_length = num_frames * frame_seqlen
 
         # we do right padding to get to a multiple of 128

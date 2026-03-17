@@ -2029,14 +2029,30 @@ async def get_hardware_info(
         import torch  # Lazy import to avoid loading at CLI startup
 
         vram_gb = None
+        mps_allocated_gb = None
 
         if torch.cuda.is_available():
             # Get total VRAM from the first GPU (in bytes), convert to GB
             _, total_mem = torch.cuda.mem_get_info(0)
             vram_gb = total_mem / (1024**3)
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            # Apple Silicon: report unified memory as available VRAM
+            import os
+            try:
+                total_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+                vram_gb = total_bytes / (1024**3)
+            except Exception:
+                vram_gb = None
+
+            # Current MPS memory allocated
+            try:
+                mps_allocated_gb = torch.mps.current_allocated_memory() / (1024**3)
+            except Exception:
+                pass
 
         return HardwareInfoResponse(
             vram_gb=vram_gb,
+            mps_allocated_gb=mps_allocated_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
             syphon_available=is_syphon_output_available(),

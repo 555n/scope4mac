@@ -41,6 +41,8 @@ class HeadlessSession:
         while self._frame_consumer_running and self.frame_processor.running:
             frame_tensor = self.frame_processor.get()
             if frame_tensor is not None:
+                if getattr(frame_tensor, "device", None) is not None and frame_tensor.device.type != "cpu":
+                    frame_tensor = frame_tensor.cpu()
                 frame_np = frame_tensor.numpy()
                 with self._frame_lock:
                     self._last_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")

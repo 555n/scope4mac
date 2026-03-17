@@ -100,15 +100,31 @@ class PipelineRegistry:
 def _get_gpu_vram_gb() -> float | None:
     """Get total GPU VRAM in GB if available.
 
+    On CUDA: reports GPU VRAM.
+    On MPS (Apple Silicon): reports total unified memory, since GPU shares
+    the full memory pool. A 96GB M2 Max can load any model that fits in RAM.
+
     Returns:
-        Total VRAM in GB if GPU is available, None otherwise
+        Total VRAM/unified memory in GB if GPU is available, None otherwise
     """
     try:
         if torch.cuda.is_available():
             _, total_mem = torch.cuda.mem_get_info(0)
             return total_mem / (1024**3)
     except Exception as e:
-        logger.warning(f"Failed to get GPU VRAM info: {e}")
+        logger.warning(f"Failed to get CUDA VRAM info: {e}")
+
+    # Apple Silicon MPS — report unified memory as available VRAM
+    try:
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            import os
+            total_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+            total_gb = total_bytes / (1024**3)
+            logger.info(f"Apple Silicon detected: {total_gb:.0f} GB unified memory")
+            return total_gb
+    except Exception as e:
+        logger.warning(f"Failed to get MPS unified memory info: {e}")
+
     return None
 
 
@@ -135,7 +151,8 @@ def _register_pipelines():
     vram_gb = _get_gpu_vram_gb()
 
     if vram_gb is not None:
-        logger.info(f"GPU detected with {vram_gb:.1f} GB VRAM")
+        device_type = "CUDA" if torch.cuda.is_available() else "MPS (unified memory)"
+        logger.info(f"{device_type} detected with {vram_gb:.1f} GB available")
     else:
         logger.info("No GPU detected")
 
@@ -173,6 +190,7 @@ def _register_pipelines():
         ("scribble", ".scribble.pipeline", "ScribblePipeline"),
         ("gray", ".gray.pipeline", "GrayPipeline"),
         ("optical_flow", ".optical_flow.pipeline", "OpticalFlowPipeline"),
+        ("turbo4mac", ".turbo4mac.pipeline", "Turbo4MacPipeline"),
     ]
 
     # Try to import and register each pipeline

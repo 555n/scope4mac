@@ -203,7 +203,7 @@ export class ScopeElectronAppService {
     const mainWindow = new BrowserWindow({
       width: WINDOW_CONFIG.MAIN.width,
       height: WINDOW_CONFIG.MAIN.height,
-      title: 'Daydream Scope',
+      title: 'Daydream Scope4Mac',
       icon: windowIcon,
       backgroundColor: COLORS.BACKGROUND,
       darkTheme: true,
@@ -383,7 +383,7 @@ export class ScopeElectronAppService {
       },
     ]);
 
-    this.tray.setToolTip('Daydream Scope');
+    this.tray.setToolTip('Daydream Scope4Mac');
     this.tray.setContextMenu(contextMenu);
 
     this.tray.on('click', () => {
