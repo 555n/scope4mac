@@ -86,6 +86,7 @@ from .models_config import (
     models_are_downloaded,
 )
 from .pipeline_manager import PipelineManager
+from .tempo_router import router as tempo_router
 from .recording import (
     cleanup_recording_files,
     cleanup_temp_file,
@@ -290,6 +291,8 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global tempo sync manager instance
+tempo_sync = None
 # Global OSC server instance
 osc_server = None
 
@@ -321,6 +324,7 @@ async def lifespan(app: FastAPI):
         pipeline_manager, \
         cloud_connection_manager, \
         kafka_publisher, \
+        tempo_sync, \
         osc_server
 
     # Check CUDA availability and warn if not available
@@ -362,6 +366,11 @@ async def lifespan(app: FastAPI):
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
 
+    # Initialize tempo sync (Ableton Link + MIDI Clock)
+    from .tempo_sync import TempoSync
+    tempo_sync = TempoSync()
+    logger.info("Tempo sync manager initialized")
+
     # Initialize Kafka publisher if credentials are configured
     if is_kafka_enabled():
         kafka_publisher = KafkaPublisher()
@@ -400,6 +409,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if tempo_sync:
+        logger.info("Shutting down tempo sync...")
+        await tempo_sync.stop()
+        logger.info("Tempo sync shutdown complete")
+
     if osc_server:
         logger.info("Shutting down OSC server...")
         await osc_server.stop()
@@ -457,6 +471,7 @@ app = FastAPI(
 
 # MCP server endpoints (headless sessions, parameters, frame capture, etc.)
 app.include_router(mcp_router)
+app.include_router(tempo_router)
 
 # Add CORS middleware
 app.add_middleware(

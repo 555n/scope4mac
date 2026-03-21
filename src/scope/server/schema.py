@@ -872,3 +872,28 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+
+
+# --- Tempo Sync schemas (from v0.1.9) ---
+
+class TempoEnableRequest(BaseModel):
+    """Request to enable tempo synchronization."""
+    source: str = Field(..., description="Tempo source type (link or midi_clock)")
+    midi_device: str | None = Field(default=None, description="MIDI input device name")
+    bpm: float = Field(default=120.0, ge=20.0, le=300.0, description="Initial BPM")
+    beats_per_bar: int = Field(default=4, ge=1, le=16, description="Beats per bar")
+
+class TempoStatusResponse(BaseModel):
+    """Current tempo sync status."""
+    enabled: bool = Field(..., description="Whether tempo sync is active")
+    source: dict | None = Field(default=None, description="Active source info")
+    beats_per_bar: int = Field(default=4, description="Beats per bar")
+    beat_state: dict | None = Field(default=None, description="Current beat state")
+
+class TempoSetTempoRequest(BaseModel):
+    """Request to change the session tempo."""
+    bpm: float = Field(..., ge=20.0, le=300.0, description="Target BPM")
+
+class TempoSourcesResponse(BaseModel):
+    """Available tempo sources."""
+    sources: dict = Field(..., description="Available sources keyed by type")
