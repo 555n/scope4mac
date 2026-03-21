@@ -42,10 +42,9 @@ function extractModulatableTargets(
 
   const targets: ModulationTarget[] = [];
   for (const [key, prop] of Object.entries(configSchema.properties)) {
-    if (!prop.ui?.modulatable) continue;
+    const ui = prop.ui as Record<string, unknown> | undefined;
+    if (!ui?.modulatable) continue;
 
-    // For list params (e.g. denoising_steps), base_value is unused by the engine
-    // (it shifts elements additively), but we still need a placeholder.
     const isList = prop.type === "array" || Array.isArray(prop.default);
     const defaultBase = isList
       ? 0
@@ -55,10 +54,10 @@ function extractModulatableTargets(
 
     targets.push({
       value: key,
-      label: prop.ui?.label || formatFieldName(key),
+      label: (ui?.label as string) || formatFieldName(key),
       defaultBase,
-      min: prop.ui?.modulatable_min ?? prop.minimum ?? 0,
-      max: prop.ui?.modulatable_max ?? prop.maximum ?? 1,
+      min: (ui?.modulatable_min as number) ?? prop.minimum ?? 0,
+      max: (ui?.modulatable_max as number) ?? prop.maximum ?? 1,
       isList,
     });
   }

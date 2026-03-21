@@ -14,6 +14,10 @@ export interface SchemaFieldUI {
   is_load_param?: boolean;
   /** Short label for the UI. When set, used instead of description for the field label. */
   label?: string;
+  /** Tempo modulation support */
+  modulatable?: boolean;
+  modulatable_min?: number;
+  modulatable_max?: number;
 }
 
 export interface SchemaProperty {
