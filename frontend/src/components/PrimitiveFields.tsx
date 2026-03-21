@@ -1,9 +1,3 @@
-/**
- * Primitive field renderers for dynamic settings panel.
- * Exports per-type components (TextField, NumberField, SliderField, ToggleField, EnumField)
- * and SchemaPrimitiveField which dispatches by inferred or explicit fieldType.
- */
-
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import {
@@ -17,6 +11,7 @@ import { Toggle } from "./ui/toggle";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { Minus, Plus } from "lucide-react";
+import React from "react";
 import type {
   SchemaProperty,
   SchemaFieldUI,
@@ -49,7 +44,6 @@ function resolveLabelAndTooltip(
   return { label: resolvedLabel, tooltip: tooltip ?? description ?? "" };
 }
 
-/** Text input field. */
 export function TextField({
   fieldKey,
   prop,
@@ -62,26 +56,25 @@ export function TextField({
   const { label: displayLabel, tooltip: displayTooltip } =
     resolveLabelAndTooltip(fieldKey, prop.description, label, tooltip);
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <LabelWithTooltip
           label={displayLabel}
           tooltip={displayTooltip}
-          className="text-sm font-medium"
+          className="text-[13px] font-semibold tracking-tight text-foreground/80"
         />
         <Input
           type="text"
           value={String(value ?? prop.default ?? "")}
           onChange={e => onChange(e.target.value)}
           disabled={disabled}
-          className="h-8"
+          className="h-7 text-[13px] bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-md px-2"
         />
       </div>
     </div>
   );
 }
 
-/** Number input field (no slider). */
 export function NumberField({
   fieldKey,
   prop,
@@ -96,84 +89,57 @@ export function NumberField({
   const rawVal = typeof value === "number" ? value : Number(prop.default) || 0;
   const numVal = Math.round(rawVal);
   const min = typeof prop.minimum === "number" ? Math.round(prop.minimum) : 0;
-  const max =
-    typeof prop.maximum === "number" ? Math.round(prop.maximum) : 2147483647;
-  const increment = () => {
-    if (numVal >= max) return;
-    onChange(numVal + 1);
-  };
-  const decrement = () => {
-    if (numVal <= min) return;
-    onChange(numVal - 1);
-  };
+  const max = typeof prop.maximum === "number" ? Math.round(prop.maximum) : 2147483647;
+  
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseInt(e.target.value, 10);
-    if (!Number.isNaN(v)) onChange(v);
+    if (!Number.isNaN(v)) onChange(Math.max(min, Math.min(max, v)));
   };
-  const labelText = displayLabel;
-  const isLongLabel = labelText.length > 20;
-  const stepper = (
-    <div
-      className={
-        isLongLabel
-          ? "w-full flex items-center border rounded-full overflow-hidden h-8"
-          : "flex-1 min-w-0 flex items-center border rounded-full overflow-hidden h-8"
-      }
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-        onClick={decrement}
-        disabled={disabled || numVal <= min}
-      >
-        <Minus className="h-3.5 w-3.5" />
-      </Button>
-      <Input
-        type="number"
-        value={numVal}
-        onChange={handleInputChange}
-        disabled={disabled}
-        min={min}
-        max={max}
-        className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 flex-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-      />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
-        onClick={increment}
-        disabled={disabled || numVal >= max}
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </Button>
-    </div>
-  );
+
   return (
-    <div className="space-y-2">
-      <div
-        className={
-          isLongLabel ? "flex flex-col gap-1.5" : "flex items-center gap-2"
-        }
-      >
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
         <LabelWithTooltip
-          label={labelText}
+          label={displayLabel}
           tooltip={displayTooltip}
-          className={
-            isLongLabel
-              ? "text-sm font-medium"
-              : "text-sm font-medium w-20 shrink-0"
-          }
+          className="text-[13px] font-semibold tracking-tight text-foreground/80"
         />
-        {stepper}
+        <div className="flex items-center gap-1 bg-black/5 dark:bg-white/5 rounded-full p-0.5 border border-black/10 dark:border-white/10">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0 rounded-full hover:bg-black/10 dark:hover:bg-white/10 active:scale-90 transition-all"
+            onClick={() => onChange(Math.max(min, numVal - 1))}
+            disabled={disabled || numVal <= min}
+          >
+            <Minus className="h-3 w-3" />
+          </Button>
+          <input
+            type="number"
+            value={numVal}
+            onChange={handleInputChange}
+            disabled={disabled}
+            className="w-12 h-6 text-center bg-white dark:bg-white text-black rounded-full text-[13px] font-bold shadow-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-transform active:scale-95"
+            min={min}
+            max={max}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0 rounded-full hover:bg-black/10 dark:hover:bg-white/10 active:scale-90 transition-all"
+            onClick={() => onChange(Math.min(max, numVal + 1))}
+            disabled={disabled || numVal >= max}
+          >
+            <Plus className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
 
-/** Slider field (number with min/max). Integer when prop.type !== "number". */
 export function SliderField({
   fieldKey,
   prop,
@@ -190,8 +156,8 @@ export function SliderField({
   const max = typeof prop.maximum === "number" ? prop.maximum : 100;
   const isFloat = prop.type === "number";
   const step = isFloat ? 0.01 : 1;
-  const incrementAmount = isFloat ? 0.01 : 1;
   const numVal = isFloat ? rawVal : Math.round(rawVal);
+  
   return (
     <SliderWithInput
       label={displayLabel}
@@ -202,20 +168,17 @@ export function SliderField({
       min={min}
       max={max}
       step={step}
-      incrementAmount={incrementAmount}
-      labelClassName="text-sm font-medium w-20 shrink-0"
+      disabled={disabled}
       valueFormatter={isFloat ? (v: number) => v : (v: number) => Math.round(v)}
       inputParser={
         isFloat
           ? (v: string) => parseFloat(v) || numVal
           : (v: string) => Math.round(parseFloat(v) || numVal)
       }
-      disabled={disabled}
     />
   );
 }
 
-/** Toggle field (boolean). */
 export function ToggleField({
   fieldKey,
   prop,
@@ -229,19 +192,19 @@ export function ToggleField({
     resolveLabelAndTooltip(fieldKey, prop.description, label, tooltip);
   const boolVal = value === true;
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <LabelWithTooltip
           label={displayLabel}
           tooltip={displayTooltip}
-          className="text-sm font-medium"
+          className="text-[13px] font-semibold tracking-tight text-foreground/80"
         />
         <Toggle
           pressed={boolVal}
           onPressedChange={p => onChange(p)}
           variant="outline"
           size="sm"
-          className="h-7"
+          className="h-7 px-3 bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-full data-[state=on]:bg-blue-500 data-[state=on]:text-white transition-all active:scale-95"
           disabled={disabled}
         >
           {boolVal ? "ON" : "OFF"}
@@ -252,11 +215,9 @@ export function ToggleField({
 }
 
 export interface EnumFieldProps extends BaseFieldProps {
-  /** Enum options from schema $defs when using $ref */
   enumValues?: string[];
 }
 
-/** Enum/dropdown field. */
 export function EnumField({
   fieldKey,
   prop,
@@ -271,24 +232,24 @@ export function EnumField({
     resolveLabelAndTooltip(fieldKey, prop.description, label, tooltip);
   const options = enumValues ?? (prop.enum as string[]) ?? [];
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <LabelWithTooltip
           label={displayLabel}
           tooltip={displayTooltip}
-          className="text-sm font-medium"
+          className="text-[13px] font-semibold tracking-tight text-foreground/80"
         />
         <Select
           value={String(value ?? prop.default ?? "")}
           onValueChange={v => onChange(v)}
           disabled={disabled}
         >
-          <SelectTrigger className="w-[140px] h-7">
+          <SelectTrigger className="w-[140px] h-7 bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-md px-2 text-[13px] focus:ring-0">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="bg-background/95 backdrop-blur-md border-black/10 dark:border-white/10">
             {options.map(opt => (
-              <SelectItem key={String(opt)} value={String(opt)}>
+              <SelectItem key={String(opt)} value={String(opt)} className="text-[13px]">
                 {String(opt)}
               </SelectItem>
             ))}
@@ -301,19 +262,11 @@ export function EnumField({
 
 export interface SchemaPrimitiveFieldProps extends BaseFieldProps {
   ui?: SchemaFieldUI;
-  /** When provided, dispatch by this type instead of inferring from prop */
   fieldType?: PrimitiveFieldType;
-  /** Enum options from schema $defs when field uses $ref */
   enumValues?: string[];
-  /** Whether this field should be MIDI-mappable (for runtime parameters) */
   midiMappable?: boolean;
 }
 
-/**
- * Renders a single primitive schema-driven field by dispatching to
- * TextField, NumberField, SliderField, ToggleField, or EnumField.
- * Uses fieldType when given, otherwise infers from prop.
- */
 export function SchemaPrimitiveField({
   fieldKey,
   prop,
@@ -340,7 +293,6 @@ export function SchemaPrimitiveField({
     tooltip: (tooltip ?? prop.description) as string | undefined,
   };
 
-  // Determine MIDI mapping type and metadata
   let mappingType: "continuous" | "toggle" | "enum_cycle" | undefined;
   let range: { min: number; max: number } | undefined;
   let enumVals: string[] | undefined;

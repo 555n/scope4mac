@@ -157,14 +157,14 @@ export function useStreamState() {
     [pipelineSchemas]
   );
 
-  // Default pipeline ID to use before schemas load
-  const defaultPipelineId = "longlive";
+  // Default pipeline ID — turbo4mac for Apple Silicon
+  const defaultPipelineId = "turbo4mac";
 
   // Get initial defaults (use fallback since schemas haven't loaded yet)
-  const initialDefaults = getFallbackDefaults("text");
+  const initialDefaults = getFallbackDefaults("video");
 
   const [settings, setSettings] = useState<SettingsState>({
-    pipelineId: "longlive",
+    pipelineId: "turbo4mac",
     resolution: {
       height: initialDefaults.height,
       width: initialDefaults.width,

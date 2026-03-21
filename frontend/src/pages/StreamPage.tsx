@@ -693,6 +693,8 @@ export function StreamPage() {
         : { height: defaults.height, width: defaults.width };
 
     // Update the pipeline in settings with the appropriate mode and defaults
+    // Total state purge on pipeline switch — prevents stale params from
+    // previous pipeline contaminating the new one (the "wonderful turbo" bug)
     updateSettings({
       pipelineId,
       inputMode: modeToUse,
@@ -700,7 +702,8 @@ export function StreamPage() {
       resolution,
       noiseScale: defaults.noiseScale,
       noiseController: defaults.noiseController,
-      loras: [], // Clear LoRA controls when switching pipelines
+      schemaFieldOverrides: {},  // CRITICAL: purge pipeline-specific overrides
+      loras: [],
       preprocessorSchemaFieldOverrides: {},
       postprocessorSchemaFieldOverrides: {},
     });
@@ -1611,7 +1614,16 @@ export function StreamPage() {
       }
       pipelineIds.push(pipelineIdToUse);
       if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
-        pipelineIds.push(...settings.postprocessorIds);
+        // Sort: non-interpolating effects (bloom) before interpolators (rife)
+        // so bloom runs on source frames, RIFE interpolates the result
+        const sorted = [...settings.postprocessorIds].sort((a, b) => {
+          const aIsInterp = a === "rife";
+          const bIsInterp = b === "rife";
+          if (aIsInterp && !bIsInterp) return 1;
+          if (!aIsInterp && bIsInterp) return -1;
+          return 0;
+        });
+        pipelineIds.push(...sorted);
       }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
@@ -2013,20 +2025,30 @@ export function StreamPage() {
         {/* Y2K Chrome Tribal Decorations */}
         <ChromeTribalOverlay />
 
-        {/* Header */}
-        <Header
-          onPipelinesRefresh={handlePipelinesRefresh}
-          cloudDisabled={isStreaming}
-          openSettingsTab={openSettingsTab}
-          onSettingsTabOpened={() => setOpenSettingsTab(null)}
-          hardwareInfo={hardwareInfo}
-          refreshHardwareInfo={refreshHardwareInfo}
-        />
+        {/* Prefs bar — flush top-left, next to OS semaphore */}
+        <div className="shrink-0 flex items-center px-2 py-1" style={{ marginTop: -2 }}>
+          <div style={{ width: 70 }} /> {/* Space for OS traffic lights */}
+          <Header
+            onPipelinesRefresh={handlePipelinesRefresh}
+            cloudDisabled={isStreaming}
+            openSettingsTab={openSettingsTab}
+            onSettingsTabOpened={() => setOpenSettingsTab(null)}
+          />
+        </div>
 
         {/* Main Content Area */}
         <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
-          {/* Left Panel - Input & Controls */}
-          <div className="w-1/5 flex flex-col gap-3 min-h-0">
+          {/* Left Panel - Logo + Input & Controls */}
+          <div className="w-[260px] shrink-0 flex flex-col gap-3 min-h-0">
+            {/* Logo + type */}
+            <div className="flex flex-col items-center py-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <img src="/chrome-tribal.png" alt="" style={{ width: 60, height: "auto", transform: "rotate(15deg) scaleX(-1)", opacity: 0.9, filter: "drop-shadow(0 0 8px rgba(0,255,255,0.5))" }} />
+                <img src="/happy-mac.svg" alt="" className="h-12 w-12" />
+                <img src="/chrome-tribal.png" alt="" style={{ width: 60, height: "auto", transform: "rotate(-15deg)", opacity: 0.9, filter: "drop-shadow(0 0 8px rgba(0,255,255,0.5))" }} />
+              </div>
+              <span style={{ fontFamily: "Garamond, Georgia, serif", fontStyle: "italic", fontSize: "22px", color: "#222", textShadow: "0 1px 0 rgba(255,255,255,0.6)", letterSpacing: "-0.5px" }}>Scope4Mac</span>
+            </div>
             <InputAndControlsPanel
               className="flex-1 min-h-0"
               pipelines={pipelines}
@@ -2143,10 +2165,9 @@ export function StreamPage() {
             )}
           </div>
 
-          {/* Center Panel - Video Output + Timeline */}
-          <div className="flex-1 flex flex-col min-h-0">
-            {/* Video area - takes remaining space but can shrink */}
-            <div className="flex-1 min-h-0">
+          {/* Center Panel - Video (square) + Timeline */}
+          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+            <div className="min-h-0 min-w-0 overflow-hidden mx-auto" style={{ aspectRatio: "1/1", width: "100%", maxWidth: "100%", flex: "1 1 0" }}>
               <VideoOutput
                 className="h-full"
                 remoteStream={remoteStream}
@@ -2306,8 +2327,12 @@ export function StreamPage() {
             </div>
           </div>
 
-          {/* Right Panel - Parameters */}
-          <div className="w-1/5 flex flex-col gap-3 min-h-0">
+          {/* Right Panel - Icon + Prefs + Parameters */}
+          <div className="w-[320px] shrink-0 flex flex-col gap-3 min-h-0 overflow-hidden">
+            {/* Daydream icon */}
+            <div className="flex justify-center shrink-0 py-2">
+              <img src="/daydream-icon.png" alt="" style={{ width: 160, height: "auto" }} />
+            </div>
             <SettingsPanel
               className="flex-1 min-h-0"
               pipelines={pipelines}

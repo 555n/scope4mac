@@ -1,8 +1,8 @@
 import { Button } from "./button";
-import { Input } from "./input";
 import { DebouncedSlider } from "./debounced-slider";
 import { LabelWithTooltip } from "./label-with-tooltip";
 import { Plus, Minus } from "lucide-react";
+import React from "react";
 
 interface SliderWithInputProps {
   label?: string;
@@ -23,16 +23,6 @@ interface SliderWithInputProps {
   renderExtraButton?: () => React.ReactNode;
 }
 
-/**
- * A reusable component that combines a labeled input field with increment/decrement buttons
- * and a debounced slider for numeric value selection.
- *
- * Features:
- * - Input field with increment/decrement buttons for precise control
- * - Debounced slider for smooth dragging without excessive callbacks
- * - Optional value formatting and parsing for custom number handling
- * - Optional extra button rendering (e.g., remove button)
- */
 export function SliderWithInput({
   label,
   tooltip,
@@ -45,7 +35,7 @@ export function SliderWithInput({
   incrementAmount = step,
   disabled = false,
   className = "",
-  labelClassName = "text-sm font-medium w-16",
+  labelClassName = "",
   debounceMs = 100,
   valueFormatter = v => v,
   inputParser = v => {
@@ -68,50 +58,40 @@ export function SliderWithInput({
     onValueCommit?.(formattedValue);
   };
 
-  const handleInputChange = (inputValue: string) => {
-    const parsedValue = inputParser(inputValue);
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const parsedValue = inputParser(e.target.value);
     const clampedValue = Math.max(min, Math.min(max, parsedValue));
     const formattedValue = valueFormatter(clampedValue);
     onValueChange(formattedValue);
     onValueCommit?.(formattedValue);
   };
 
-  const handleSliderValueChange = (newValue: number[]) => {
-    const formattedValue = valueFormatter(newValue[0]);
-    onValueChange(formattedValue);
-  };
-
-  const handleSliderCommit = (newValue: number[]) => {
-    const formattedValue = valueFormatter(newValue[0]);
-    onValueCommit?.(formattedValue);
-  };
-
   return (
     <div className={`space-y-2 ${className}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-3">
         {label && (
           <LabelWithTooltip
             label={label}
             tooltip={tooltip}
-            className={labelClassName}
+            className={`text-[13px] font-semibold tracking-tight text-foreground/80 ${labelClassName}`}
           />
         )}
-        <div className="flex-1 flex items-center border rounded-full overflow-hidden h-8 min-w-0">
+        <div className="flex items-center gap-1 bg-black/5 dark:bg-white/5 rounded-full p-0.5 border border-black/10 dark:border-white/10 shadow-sm">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+            className="h-6 w-6 shrink-0 rounded-full hover:bg-black/10 dark:hover:bg-white/10 active:scale-90 transition-all"
             onClick={handleDecrement}
             disabled={disabled}
           >
-            <Minus className="h-3.5 w-3.5" />
+            <Minus className="h-3 w-3" />
           </Button>
-          <Input
+          <input
             type="number"
             value={value}
-            onChange={e => handleInputChange(e.target.value)}
+            onChange={handleInputChange}
             disabled={disabled}
-            className="text-center border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 min-w-0 px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            className="w-12 h-6 text-center bg-white dark:bg-white text-black rounded-full text-[13px] font-bold shadow-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-transform active:scale-95"
             min={min}
             max={max}
             step={step}
@@ -119,26 +99,28 @@ export function SliderWithInput({
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 shrink-0 rounded-none hover:bg-accent"
+            className="h-6 w-6 shrink-0 rounded-full hover:bg-black/10 dark:hover:bg-white/10 active:scale-90 transition-all"
             onClick={handleIncrement}
             disabled={disabled}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-3 w-3" />
           </Button>
           {renderExtraButton?.()}
         </div>
       </div>
-      <DebouncedSlider
-        value={[value]}
-        onValueChange={handleSliderValueChange}
-        onValueCommit={handleSliderCommit}
-        min={min}
-        max={max}
-        step={step}
-        disabled={disabled}
-        className="w-full"
-        debounceMs={debounceMs}
-      />
+      <div className="px-1">
+        <DebouncedSlider
+          value={[value]}
+          onValueChange={v => onValueChange(valueFormatter(v[0]))}
+          onValueCommit={v => onValueCommit?.(valueFormatter(v[0]))}
+          min={min}
+          max={max}
+          step={step}
+          disabled={disabled}
+          className="w-full"
+          debounceMs={debounceMs}
+        />
+      </div>
     </div>
   );
 }

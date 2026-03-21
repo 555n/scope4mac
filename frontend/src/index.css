@@ -211,6 +211,21 @@ body.theme-aurora {
     letter-spacing: 0.01em;
   }
 
+  /* Aqua section titles — embossed inset look */
+  h3.text-sm.font-medium,
+  .aqua-section-title {
+    font-family: "Lucida Grande", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+    padding-bottom: 3px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    margin-bottom: 6px;
+  }
+
   /* macOS-style overlay scrollbars */
   ::-webkit-scrollbar {
     width: 8px;

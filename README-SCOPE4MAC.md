@@ -8,7 +8,8 @@ Built for a Daydream hackathon. March 2026.
 
 | Pipeline | FPS (M2 Max 96GB) | Resolution | Notes |
 |---|---|---|---|
-| **turbo4mac** | ~6 FPS | 256x256 | SD-Turbo 1-step img2img + TAESD. Real output. |
+| **turbo4mac** | **~14 FPS** | 256x256 | SD-Turbo 1-step img2img + TAESD. GPU-native path. |
+| **turbo4mac (PIL)** | ~13 FPS | 256x256 | Fallback path with PIL conversion. |
 | **LongLive** | ~0.6 FPS | 320x576 | Wan2.1 1.3B autoregressive. Real output, slow. |
 | **RIFE** | works | any | Frame interpolation postprocessor. 2-frame minimum. |
 | **Preprocessors** | all work | any | passthrough, scribble, gray, optical flow, depth, controller-viz |
@@ -17,8 +18,8 @@ Krea (14B) and StreamDiffusionV2 load but are too slow for interactive use on MP
 
 ## What Doesn't Work (Yet)
 
-- **20 FPS target**: The raw UNet forward pass is 85ms at 256x256 (12 FPS theoretical). In-app overhead (PIL conversion, WebRTC framing) drops it to 6 FPS. A low-level GPU-only path achieves 10 FPS in isolated benchmarks but produces noise in the app context — suspected MPS async execution or scheduler state interaction. Needs debugging.
 - **RIFE target FPS menu**: Not implemented. RIFE works as a postprocessor but there's no UI to select target framerate (15/24/30/60).
+- **In-app FPS verification**: The 14 FPS number is from isolated benchmarks. Full app context (WebRTC, Electron, pipeline_processor overhead) needs verification.
 
 ## How to Build
 
@@ -106,9 +107,11 @@ This reports the full unified memory pool (96GB on M2 Max). Used for pipeline re
 
 `EulerAncestralDiscreteScheduler.step()` with `num_inference_steps=1` crashes with `IndexError: index 2 is out of bounds for dimension 0 with size 2` — it tries to access `sigmas[step_index + 1]`. Workaround: use `num_inference_steps=2` with `strength=0.5` to get 1 actual UNet pass through the scheduler without the crash.
 
-### PIL Overhead
+### PIL Overhead (Solved)
 
-Converting tensors to PIL and back costs ~30-40ms per frame. At 50ms/frame budget (20 FPS), that's 60-80% of the budget wasted on format conversion. The `output_type="pt"` flag in diffusers and cached `prompt_embeds` help, but the input path still uses PIL in the working version. A GPU-native input path works in isolated tests but produces noise in the app context.
+Converting tensors to PIL and back costs ~30-40ms per frame. The v0.7.0 GPU-native path eliminates this: input tensor stays on MPS, resize via `F.interpolate`, TAESD encode/decode on device, single CPU transfer at output. Result: 72ms/frame (14 FPS) vs 77ms/frame (13 FPS PIL path).
+
+The noise bug that plagued earlier low-level attempts (v0.3.5, v0.4.8) was caused by not resetting the scheduler state between frames (`set_timesteps` + `set_begin_index` must be called each frame) and incorrect input normalization (must be [-1, 1], not [0, 255] or [0, 1]).
 
 ## Architecture
 
@@ -151,7 +154,14 @@ Raw UNet forward pass benchmarks on M2 Max 96GB:
 | SD-Turbo (866M) | 512x512 | 64x64 | ~300ms | 3.3 |
 | Wan2.1 1.3B | 320x576 | 40x72 | ~1.9s | 0.5 |
 
-In-app FPS is lower due to VAE encode/decode, WebRTC framing, and PIL conversion overhead.
+End-to-end turbo4mac benchmarks (TAESD encode + UNet + TAESD decode + scheduling):
+
+| Path | Resolution | Time | FPS |
+|---|---|---|---|
+| GPU-native | 256x256 | 72ms | 14 |
+| PIL fallback | 256x256 | 77ms | 13 |
+
+In-app FPS may be lower due to WebRTC framing and pipeline_processor overhead.
 
 ## Credits
 

@@ -1,13 +1,17 @@
 """RIFE (Real-Time Intermediate Flow Estimation) HDv3 frame interpolation module.
 
-This module provides frame interpolation functionality using RIFE HDv3 to double
+This module provides frame interpolation functionality using RIFE HDv3 to multiply
 the frame rate of video output from the pipeline.
+
+Supports recursive interpolation for 2x/4x/8x multipliers via repeated
+midpoint subdivision — each pass is a single batched model call.
 
 Modified from https://github.com/hzwer/Practical-RIFE
 The original repo is: https://github.com/hzwer/Practical-RIFE
 """
 
 import logging
+import math
 from pathlib import Path
 
 import torch
@@ -34,8 +38,9 @@ except ImportError as e:
 class RIFEInterpolator:
     """RIFE HDv3-based frame interpolator.
 
-    This class handles frame interpolation using RIFE HDv3 to generate intermediate
-    frames between consecutive frames, effectively doubling the frame rate.
+    Supports recursive multi-pass interpolation for 2x/4x/8x frame rate
+    multiplication. Each pass doubles the frame count via midpoint subdivision,
+    using a single batched model call per pass.
 
     Attributes:
         enabled: Whether interpolation is enabled
@@ -50,13 +55,6 @@ class RIFEInterpolator:
         device: torch.device | None = None,
         model_path: str | None = None,
     ):
-        """Initialize RIFE interpolator.
-
-        Args:
-            enabled: Whether interpolation is enabled
-            device: Device to run interpolation on (defaults to CUDA if available, else CPU)
-            model_path: Optional path to RIFE model weights file
-        """
         self.enabled = enabled
         self.device = device or (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -96,24 +94,18 @@ class RIFEInterpolator:
             return
 
         try:
-            # Initialize RIFE model
             self.model = RIFE_MODEL_CLASS()
 
-            # Find model weights directory (RIFE expects a directory containing flownet.pkl)
             model_dir_path = None
             if self.model_path:
-                # If path is a file, get its parent directory
                 model_path_obj = Path(self.model_path)
                 if model_path_obj.is_file():
                     model_dir_path = str(model_path_obj.parent)
                 elif model_path_obj.is_dir():
                     model_dir_path = str(model_path_obj)
             else:
-                # Try default model directories
                 from scope.server.models_config import get_models_dir
 
-                # Get project root directory (where pyproject.toml is located)
-                # Start from this file's directory and walk up to find project root
                 current_file = Path(__file__).resolve()
                 project_root = None
                 for parent in current_file.parents:
@@ -122,15 +114,12 @@ class RIFEInterpolator:
                         break
 
                 default_model_dirs = []
-                # First priority: project root weights folder
                 if project_root:
                     weights_dir = project_root / "weights" / "RIFE"
                     default_model_dirs.append(weights_dir)
 
-                # Second priority: configured models directory
                 default_model_dirs.append(get_models_dir() / "RIFE")
 
-                # Third priority: default home directory
                 default_model_dirs.append(
                     Path.home() / ".daydream-scope" / "models" / "RIFE"
                 )
@@ -141,30 +130,12 @@ class RIFEInterpolator:
                         break
 
             if model_dir_path:
-                # Load model (RIFE uses -1 for latest version)
-                # RIFE's load_model expects a directory path, not a file path
                 self.model.load_model(model_dir_path, -1)
                 self.model.eval()
-                self.model.device()  # Move model to device
+                self.model.device()
                 logger.info(
                     f"Loaded RIFE HDv3 weights from {model_dir_path}/flownet.pkl"
                 )
-
-                # Compile model for faster inference (PyTorch 2.0+)
-                # Note: torch.compile() is disabled due to CUDA graph issues with the mutable
-                # backwarp_tenGrid cache in warplayer.py. The cache is mutated during inference,
-                # which conflicts with CUDA graph capture. To enable compilation, the warplayer
-                # module would need to be refactored to avoid mutable module-level state.
-                # if hasattr(torch, "compile"):
-                #     try:
-                #         self.model.flownet = torch.compile(
-                #             self.model.flownet,
-                #             mode="default",  # Avoid CUDA graphs due to mutable cache in warplayer
-                #             fullgraph=False,  # Allow graph breaks for compatibility
-                #         )
-                #         logger.info("RIFE flownet compiled with torch.compile()")
-                #     except Exception as e:
-                #         logger.warning(f"torch.compile() failed, using eager mode: {e}")
             else:
                 raise FileNotFoundError(
                     "RIFE HDv3 model weights (flownet.pkl) not found. "
@@ -173,7 +144,6 @@ class RIFEInterpolator:
                     "See docs/rife.md for installation instructions."
                 )
         except FileNotFoundError:
-            # Re-raise FileNotFoundError for model weights
             raise
         except Exception as e:
             logger.error(f"Error loading RIFE HDv3 model: {e}", exc_info=True)
@@ -182,52 +152,59 @@ class RIFEInterpolator:
                 "See docs/rife.md for installation instructions."
             ) from e
 
-    def interpolate(self, frames: torch.Tensor) -> torch.Tensor:
-        """Interpolate frames to double the frame rate.
+    def interpolate(self, frames: torch.Tensor, multiplier: int = 2) -> torch.Tensor:
+        """Interpolate frames to multiply the frame rate.
 
         Args:
-            frames: Input frames tensor of shape [T, H, W, C] with values in [0, 255] (uint8)
+            frames: Input frames tensor [T, H, W, C] with values in [0, 255] (uint8)
+            multiplier: Frame rate multiplier (must be power of 2: 2, 4, 8).
+                        Default 2 for backwards compatibility.
 
         Returns:
-            Interpolated frames tensor of shape [T*2-1, H, W, C] with values in [0, 255] (uint8)
-
-        Raises:
-            RuntimeError: If RIFE is enabled but model is not available or loaded
+            Interpolated frames tensor [T_out, H, W, C] with values in [0, 255] (uint8)
+            where T_out = (T - 1) * multiplier + 1
         """
-        if not self.enabled:
+        if not self.enabled or multiplier <= 1:
             return frames
 
         if frames.shape[0] < 2:
-            # Can't interpolate with less than 2 frames
             return frames
 
         if not RIFE_AVAILABLE or self.model is None:
             raise RuntimeError(
-                "RIFE interpolation is enabled but RIFE HDv3 model is not available. "
-                "Please ensure RIFE HDv3 is properly installed and model weights are loaded. "
-                "See docs/rife.md for installation instructions."
+                "RIFE interpolation is enabled but RIFE HDv3 model is not available."
             )
 
-        # Convert to float32 for processing
+        # Clamp multiplier to powers of 2
+        multiplier = max(2, multiplier)
+        depth = max(1, int(math.log2(multiplier)))
+        actual_multiplier = 2 ** depth
+
+        if actual_multiplier != multiplier:
+            logger.debug(
+                "[RIFE] Rounded multiplier %d to %d (depth=%d)",
+                multiplier, actual_multiplier, depth,
+            )
+
         frames_float = frames.float()
+        return self._rife_interpolate(frames_float, depth)
 
-        # Use RIFE for interpolation
-        return self._rife_interpolate(frames_float)
+    def _rife_interpolate(self, frames: torch.Tensor, depth: int = 1) -> torch.Tensor:
+        """Recursive RIFE interpolation.
 
-    def _rife_interpolate(self, frames: torch.Tensor) -> torch.Tensor:
-        """Use RIFE model for interpolation.
+        Each depth level doubles the frame count by inserting midpoints between
+        all consecutive frames. Uses a single batched model call per level.
 
-        Optimized implementation with:
-        - BF16 mixed precision for faster tensor core inference
-        - Batched processing of all frame pairs in single forward pass
-        - Pre-computed padding applied once to all frames
-        - Minimal CPU-GPU transfers (single transfer at end)
+        depth=1 → 2x (T=2 → 3 frames, 1 model call)
+        depth=2 → 4x (T=2 → 5 frames, 2 model calls)
+        depth=3 → 8x (T=2 → 9 frames, 3 model calls)
 
         Args:
-            frames: Input frames tensor of shape [T, H, W, C] with values in [0, 255]
+            frames: Input [T, H, W, C] in [0, 255] float
+            depth: Number of recursive passes (multiplier = 2^depth)
 
         Returns:
-            Interpolated frames tensor of shape [T*2-1, H, W, C] with values in [0, 255] (uint8)
+            Interpolated [T_out, H, W, C] in [0, 255] uint8
         """
         num_frames = frames.shape[0]
         if num_frames < 2:
@@ -235,115 +212,102 @@ class RIFEInterpolator:
 
         T, H, W, C = frames.shape
 
-        # Convert from [T, H, W, C] to [T, C, H, W] and normalize to [0, 1]
-        # Move to GPU once at the start
+        # Convert to [T, C, H, W] normalized [0, 1], move to device
         frames_chw = (frames.permute(0, 3, 1, 2) / 255.0).to(self.device).contiguous()
 
-        # Calculate padding - RIFE v4.25 requires dimensions to be multiples of 32
-        # For v4.25, we need to ensure minimum padding to handle all scales properly
-        # Pad height to at least 512 if input is close (for v4.25 compatibility)
+        # Pad to multiples of 32 (RIFE v4.25 requirement)
         tmp = 32
         ph = ((H - 1) // tmp + 1) * tmp
         pw = ((W - 1) // tmp + 1) * tmp
         padding = (0, pw - W, 0, ph - H)
 
-        # Pre-compute padding for all frames at once (optimization)
         frames_padded = F.pad(frames_chw, padding)  # [T, C, pH, pW]
 
         with torch.no_grad():
-            # Use BF16 mixed precision for faster inference on modern GPUs
-            autocast_dtype = (
-                torch.bfloat16 if self.device.type == "cuda" else torch.float32
-            )
-            with torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype):
-                # Batch all frame pairs: frames[0:T-1] and frames[1:T]
-                frames1_padded = frames_padded[:-1]  # [T-1, C, pH, pW]
-                frames2_padded = frames_padded[1:]  # [T-1, C, pH, pW]
+            # BF16 autocast on CUDA; MPS supports float16 autocast; skip on CPU
+            if self.device.type == "cuda":
+                ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+            elif self.device.type == "mps":
+                ctx = torch.amp.autocast(device_type="mps", dtype=torch.float16)
+            else:
+                from contextlib import nullcontext
+                ctx = nullcontext()
 
-                # Batched inference - process all pairs at once
-                mid_frames_padded = self.model.inference(
-                    frames1_padded, frames2_padded, scale=1.0
-                )  # [T-1, C, pH, pW]
+            with ctx:
+                # Recursive midpoint subdivision
+                current = frames_padded
+                for level in range(depth):
+                    current = self._subdivide(current)
 
-            # Remove padding from interpolated frames (stay on GPU)
-            mid_frames = mid_frames_padded[:, :, :H, :W].float()  # [T-1, C, H, W]
+            # Remove padding, scale to [0, 255], transfer to CPU
+            result_chw = (current[:, :, :H, :W].float() * 255.0).cpu()
 
-            # Get original frames without padding (stay on GPU)
-            original_frames = frames_padded[:, :, :H, :W]  # [T, C, H, W]
-
-            # Interleave original and interpolated frames on GPU
-            # Result: [orig[0], mid[0], orig[1], mid[1], ..., orig[T-2], mid[T-2], orig[T-1]]
-            result_frames = torch.zeros(
-                (T * 2 - 1, C, H, W), dtype=torch.float32, device=self.device
-            )
-            result_frames[0::2] = original_frames  # Original frames at even indices
-            result_frames[1::2] = mid_frames  # Interpolated frames at odd indices
-
-            # Scale to [0, 255] and transfer to CPU once at the end
-            result_chw = (result_frames * 255.0).cpu()
-
-        # Convert back to [T*2-1, H, W, C]
+        # Convert to [T_out, H, W, C] uint8
         result = result_chw.permute(0, 2, 3, 1).contiguous()
-
-        # Clamp to valid range and convert to uint8
         result = result.clamp(0.0, 255.0).to(torch.uint8)
 
         return result
 
-    def set_enabled(self, enabled: bool):
-        """Enable or disable interpolation.
+    def _subdivide(self, frames: torch.Tensor) -> torch.Tensor:
+        """Single subdivision pass: insert midpoints between all consecutive frames.
+
+        Takes T frames, returns 2T-1 frames with interpolated midpoints.
+        Single batched model call for all T-1 pairs.
 
         Args:
-            enabled: Whether to enable interpolation
+            frames: [T, C, pH, pW] on device
 
-        Raises:
-            RuntimeError: If enabling RIFE but model is not available
+        Returns:
+            [2T-1, C, pH, pW] on device
         """
+        T = frames.shape[0]
+        if T < 2:
+            return frames
+
+        frames1 = frames[:-1]  # [T-1, C, pH, pW]
+        frames2 = frames[1:]   # [T-1, C, pH, pW]
+
+        # Batched inference — all pairs at once, single model call
+        mids = self.model.inference(frames1, frames2, scale=1.0)  # [T-1, C, pH, pW]
+
+        # Interleave: [f0, m0, f1, m1, ..., f(T-2), m(T-2), f(T-1)]
+        new_T = T * 2 - 1
+        result = torch.zeros(
+            new_T, *frames.shape[1:], dtype=frames.dtype, device=frames.device
+        )
+        result[0::2] = frames
+        result[1::2] = mids
+
+        return result
+
+    def set_enabled(self, enabled: bool):
+        """Enable or disable interpolation."""
         if enabled:
             if not RIFE_AVAILABLE:
                 raise RuntimeError(
-                    "RIFE interpolation cannot be enabled: RIFE HDv3 is not available. "
-                    "Please install RIFE HDv3 from https://github.com/hzwer/arXiv2020-RIFE. "
-                    "See docs/rife.md for installation instructions."
+                    "RIFE interpolation cannot be enabled: RIFE HDv3 is not available."
                 )
-
             if self.model is None:
-                # Try to load model if not already loaded
                 try:
                     self._load_model()
                     if self.model is None:
-                        raise RuntimeError(
-                            "RIFE HDv3 model weights not found. "
-                            "Please download RIFE HDv3 model weights. "
-                            "See docs/rife.md for installation instructions."
-                        )
+                        raise RuntimeError("RIFE HDv3 model weights not found.")
                 except Exception as e:
                     raise RuntimeError(
-                        f"Failed to load RIFE HDv3 model when enabling: {e}. "
-                        "See docs/rife.md for installation instructions."
+                        f"Failed to load RIFE HDv3 model when enabling: {e}."
                     ) from e
-
         self.enabled = enabled
 
 
 def is_rife_available() -> bool:
-    """Check if RIFE is available for use.
-
-    Returns:
-        True if RIFE is available, False otherwise
-    """
+    """Check if RIFE is available for use."""
     return RIFE_AVAILABLE
 
 
 def get_rife_model_path() -> Path | None:
-    """Get the default RIFE HDv3 model directory path.
-
-    Returns:
-        Path to RIFE HDv3 model directory (containing flownet.pkl) if found, None otherwise
-    """
+    """Get the default RIFE HDv3 model directory path."""
     from scope.server.models_config import get_models_dir
 
-    # Get project root directory
     current_file = Path(__file__).resolve()
     project_root = None
     for parent in current_file.parents:
@@ -352,15 +316,11 @@ def get_rife_model_path() -> Path | None:
             break
 
     default_dirs = []
-    # First priority: project root weights folder
     if project_root:
         weights_dir = project_root / "weights" / "RIFE"
         default_dirs.append(weights_dir)
 
-    # Second priority: configured models directory
     default_dirs.append(get_models_dir() / "RIFE")
-
-    # Third priority: default home directory
     default_dirs.append(Path.home() / ".daydream-scope" / "models" / "RIFE")
 
     for model_dir in default_dirs:

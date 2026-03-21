@@ -143,24 +143,19 @@ class VideoProcessingTrack(MediaStreamTrack):
         # Lazy initialization on first call
         self.initialize_output_processing()
 
-        # Keep running while any input source is active
         while self.input_task_running or self._input_source_enabled:
             try:
-                # Update FPS: use the FPS from the pipeline chain
                 if self.frame_processor:
-                    self.fps = self.frame_processor.get_fps()
-                    self.frame_ptime = 1.0 / self.fps
+                    self.fps = self.frame_processor.get_output_fps_hint()
+                    self.frame_ptime = 1.0 / max(self.fps, 1.0)
 
-                # If paused, wait for the appropriate frame interval before returning
                 with self._paused_lock:
                     paused = self._paused
 
                 frame = None
                 if paused:
-                    # When video is paused, return the last frame to freeze the playback video
                     frame = self._last_frame
                 else:
-                    # When video is not paused, get the next frame from the frame processor
                     frame_tensor = self.frame_processor.get()
                     if frame_tensor is not None:
                         frame = VideoFrame.from_ndarray(
@@ -171,13 +166,12 @@ class VideoProcessingTrack(MediaStreamTrack):
                     pts, time_base = await self.next_timestamp()
                     frame.pts = pts
                     frame.time_base = time_base
-
                     with self._frame_lock:
                         self._last_frame = frame
                     return frame
 
-                # No frame available, wait a bit before trying again
-                await asyncio.sleep(0.01)
+                # Yield to event loop without timer penalty
+                await asyncio.sleep(0)
 
             except Exception as e:
                 logger.error(f"Error getting processed frame: {e}")

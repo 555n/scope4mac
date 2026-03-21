@@ -68,6 +68,9 @@ class FrameProcessor:
 
         self.running = False
 
+        # Event signaled when new output frame is available (for event-driven transport)
+        self.frame_ready_event = threading.Event()
+
         # Callback to notify when frame processor stops
         self.notification_callback = notification_callback
 
@@ -510,6 +513,20 @@ class FrameProcessor:
             return DEFAULT_FPS
         return self._sink_processor.get_fps()
 
+    def get_output_fps_hint(self) -> float:
+        """Walk backwards through pipeline chain to find FPS hint.
+
+        RIFE may not be the sink (e.g. bloom sits after it). Walk all processors
+        in reverse to find the first one with a real hint.
+        """
+        for proc in reversed(self.pipeline_processors):
+            pipeline = getattr(proc, "pipeline", None)
+            if pipeline and hasattr(pipeline, "get_output_fps_hint"):
+                hint = pipeline.get_output_fps_hint()
+                if hint > 0:
+                    return min(60.0, hint)
+        return self.get_fps()
+
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
         now = time.time()
@@ -683,7 +700,7 @@ class FrameProcessor:
             try:
                 sink = sink_class()
                 if sink.create(sink_name, width, height):
-                    q: queue.Queue = queue.Queue(maxsize=30)
+                    q: queue.Queue = queue.Queue(maxsize=1)
                     t = threading.Thread(
                         target=self._output_sink_loop,
                         args=(sink_type,),
@@ -970,6 +987,9 @@ class FrameProcessor:
 
         self._graph_source_queues = graph_run.source_queues
         self._sink_processor = graph_run.sink_processor
+        # Wire frame_ready_event to sink processor for event-driven transport
+        if self._sink_processor is not None:
+            self._sink_processor.frame_ready_event = self.frame_ready_event
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
 

@@ -49,16 +49,22 @@ export function MemoryGauge({
   // Color thresholds
   const barColor =
     pct > 90
-      ? "var(--destructive)"
+      ? "#ff5f57"
       : pct > 70
         ? "#CC8800"
-        : "var(--g3-primary)";
+        : "#4a9af0";
 
   return (
     <div className="flex items-center gap-2" title={`${usedGb.toFixed(1)} / ${totalGb.toFixed(0)} GB unified memory used`}>
       <span
+        className="text-[10px] font-medium whitespace-nowrap opacity-60"
+        style={{ fontFamily: "Lucida Grande, sans-serif", color: "var(--text-secondary)" }}
+      >
+        Unified Memory
+      </span>
+      <span
         className="text-xs font-medium whitespace-nowrap"
-        style={{ fontFamily: "Chicago, 'Charcoal', monospace", color: "var(--text-secondary)" }}
+        style={{ fontFamily: "Lucida Grande, sans-serif", color: "var(--text-secondary)" }}
       >
         {usedGb.toFixed(1)} / {totalGb.toFixed(0)} GB
       </span>
@@ -67,10 +73,10 @@ export function MemoryGauge({
         style={{
           width: 100,
           height: 14,
-          background: "var(--field-bg)",
+          background: 'linear-gradient(180deg, #e0e0e0 0%, #c8c8c8 50%, #d4d4d4 100%)',
           border: "2px solid",
-          borderColor: "var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark)",
-          borderRadius: 2,
+          borderColor: "rgba(0,0,0,0.3)",
+          borderRadius: 7,
           overflow: "hidden",
           position: "relative",
         }}
@@ -80,7 +86,7 @@ export function MemoryGauge({
           style={{
             width: `${pct}%`,
             height: "100%",
-            background: `linear-gradient(180deg, ${barColor} 0%, color-mix(in srgb, ${barColor} 70%, black) 100%)`,
+            background: barColor,
             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.3)",
             transition: "width 0.6s ease-out",
           }}

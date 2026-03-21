@@ -36,7 +36,7 @@ class PassthroughPipeline(Pipeline):
         self.prompts = None
 
     def prepare(self, **kwargs) -> Requirements:
-        return Requirements(input_size=4)
+        return Requirements(input_size=1)
 
     def __call__(
         self,

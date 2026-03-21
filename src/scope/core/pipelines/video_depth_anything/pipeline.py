@@ -125,6 +125,7 @@ class VideoDepthAnythingPipeline(Pipeline):
         # Process frames one at a time using streaming mode
         depths = []
         cached_hidden_state_list = None
+        # Depth model runs on CPU for MPS compatibility (internal ops unsupported on MPS)
         device_str = "cuda" if self.device.type == "cuda" else "cpu"
 
         with torch.no_grad():

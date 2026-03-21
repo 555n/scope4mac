@@ -1,11 +1,13 @@
-"""RIFE (Real-Time Intermediate Flow Estimation) frame interpolation pipeline.
+"""RIFE-Buffered — Auto + Manual frame interpolation.
 
-Based on Practical-RIFE:
-https://github.com/hzwer/Practical-RIFE
+Auto:   Target FPS → system picks 2x/4x/8x/16x from measured input rate.
+Manual: User picks depth directly. Output = input × depth.
 """
 
+import collections
 import logging
-from typing import TYPE_CHECKING
+import math
+import time
 
 import torch
 from einops import rearrange
@@ -14,84 +16,118 @@ from ..interface import Pipeline, Requirements
 from ..process import normalize_frame_sizes, postprocess_chunk, preprocess_chunk
 from .schema import RIFEConfig
 
-if TYPE_CHECKING:
-    from ..schema import BasePipelineConfig
-
 logger = logging.getLogger(__name__)
 
 
 class RIFEPipeline(Pipeline):
-    """RIFE interpolation pipeline that doubles the frame rate of input video."""
 
     @classmethod
-    def get_config_class(cls) -> type["BasePipelineConfig"]:
+    def get_config_class(cls):
         return RIFEConfig
 
-    def __init__(
-        self,
-        config,
-        device: torch.device | None = None,
-        dtype: torch.dtype = torch.float16,
-    ):
-        """Initialize the RIFE pipeline.
-
-        Args:
-            config: Pipeline configuration
-            device: Target device (defaults to CUDA if available)
-            dtype: Data type for processing (default: float16)
-        """
+    def __init__(self, config, device=None, dtype=torch.float16):
         from .modules.interpolation import RIFEInterpolator
 
-        if device is not None:
-            self.device = device
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        else:
-            self.device = torch.device("cpu")
+        self.device = device or (
+            torch.device("cuda") if torch.cuda.is_available()
+            else torch.device("mps") if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            else torch.device("cpu"))
         self.dtype = dtype
 
-        # Initialize RIFE interpolator
-        logger.info("Loading RIFE HDv3 model...")
+        logger.info("Loading RIFE HDv3...")
         self.rife_interpolator = RIFEInterpolator(enabled=True, device=self.device)
-        logger.info("RIFE HDv3 model loaded successfully")
+        logger.info("RIFE HDv3 loaded")
 
-    def prepare(self, **kwargs) -> Requirements:
-        # Accept 2 frames minimum (for frame-by-frame pipelines like turbo4mac)
-        # RIFE interpolates between consecutive frames to double FPS
-        return Requirements(input_size=2)
+        self._prev = None
+        self._last_t = 0.0
+        self._fps_ema = 0.0
+        self._alpha = 0.3
+        self._n = 0
+        self._hint = 0.0
+        self._mult = 2
 
-    def __call__(
-        self,
-        **kwargs,
-    ) -> dict:
-        input = kwargs.get("video")
+    def prepare(self, **kwargs):
+        return Requirements(input_size=1)
 
-        if input is None:
-            raise ValueError("Input cannot be None for RIFEPipeline")
+    def __call__(self, **kwargs):
+        v = kwargs.get("video")
+        if v is None:
+            raise ValueError("No video input")
 
-        if isinstance(input, list):
-            # Normalize frame sizes to handle resolution changes
-            input = normalize_frame_sizes(input)
-            # Preprocess: convert list of frames to BCTHW tensor in [-1, 1] range
-            input = preprocess_chunk(input, self.device, self.dtype)
+        self._tick()
 
-        # Convert from BCTHW to THWC format for RIFE
-        # First convert to BTCHW, then use postprocess_chunk to get THWC [0, 1]
-        input_btchw = rearrange(input, "B C T H W -> B T C H W")
-        input_thwc = postprocess_chunk(input_btchw)  # Now in THWC [0, 1] range
+        if isinstance(v, list):
+            v = normalize_frame_sizes(v)
+            v = preprocess_chunk(v, self.device, self.dtype)
 
-        # Convert to [0, 255] uint8 for RIFE interpolation
-        input_uint8 = (input_thwc * 255.0).clamp(0, 255).to(torch.uint8)
+        f = postprocess_chunk(rearrange(v, "B C T H W -> B T C H W"))
+        f = (f * 255).clamp(0, 255).to(torch.uint8)
+        if f.dim() == 4:
+            f = f[0]
 
-        # Apply RIFE interpolation (expects THWC [0, 255] uint8, returns THWC [0, 255] uint8)
-        # This doubles the frame rate: T frames -> 2*T-1 frames
-        interpolated = self.rife_interpolator.interpolate(input_uint8)
+        mode = str(kwargs.get("rife_mode", "auto"))
 
-        # Convert back to [0, 1] float range
-        # RIFE returns THWC [0, 255] uint8, convert to THWC [0, 1] float
-        interpolated_float = interpolated.float() / 255.0
+        if mode == "manual":
+            d = 2
+            try:
+                d = int(kwargs.get("depth", 2))
+            except (TypeError, ValueError):
+                pass
+            mult = self._p2(d)
+        else:
+            tfps = 60
+            try:
+                tfps = int(kwargs.get("target_fps", 60))
+            except (TypeError, ValueError):
+                pass
+            mult = self._auto_mult(tfps)
 
-        # Return THWC [0, 1] float format (same as postprocess_chunk output)
-        return {"video": interpolated_float}
+        if self._prev is None:
+            self._prev = f.clone()
+            self._hint = max(self._fps_ema, 1.0)
+            return {"video": (f.float() / 255).unsqueeze(0)}
+
+        pair = torch.stack([self._prev, f])
+        out = self.rife_interpolator.interpolate(pair, multiplier=mult)[1:]
+        self._prev = f.clone()
+        self._hint = min(60.0, max(self._fps_ema, 1.0) * mult)
+        self._mult = mult
+
+        if self._n % 30 == 1:
+            logger.info("[RIFE-%s] %dx in=%.1f→%.0f frames=%d",
+                        mode, mult, self._fps_ema, self._hint, out.shape[0])
+
+        return {"video": out.float() / 255}
+
+    def get_output_fps_hint(self):
+        return self._hint if self._hint > 0 else 0.0
+
+    def reset(self):
+        self._prev = None
+        self._last_t = 0.0
+        self._fps_ema = 0.0
+        self._n = 0
+
+    def _tick(self):
+        now = time.perf_counter()
+        self._n += 1
+        if self._last_t > 0:
+            dt = now - self._last_t
+            if dt > 0:
+                i = 1.0 / dt
+                self._fps_ema = (self._alpha * i + (1 - self._alpha) * self._fps_ema) if self._fps_ema > 0 else i
+        self._last_t = now
+
+    def _auto_mult(self, target):
+        if target <= 0 or self._n < 3 or self._fps_ema <= 0:
+            return 2
+        r = target / max(self._fps_ema, 1e-6)
+        if r < 1.15: return 1
+        if r < 3: return 2
+        if r < 6: return 4
+        if r < 12: return 8
+        return 16
+
+    @staticmethod
+    def _p2(d):
+        return min(16, 2 ** max(1, round(math.log2(max(d, 2)))))

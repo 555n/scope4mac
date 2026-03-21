@@ -1,23 +1,33 @@
+from enum import Enum
+
+from pydantic import Field
+
 from ..artifacts import HuggingfaceRepoArtifact
-from ..base_schema import BasePipelineConfig, ModeDefaults, UsageType
+from ..base_schema import BasePipelineConfig, ModeDefaults, UsageType, ui_field_config
+
+
+class RifeMode(str, Enum):
+    auto = "auto"
+    manual = "manual"
+
+
+class InterpolationDepth(int, Enum):
+    x2 = 2
+    x4 = 4
+    x8 = 8
+    x16 = 16
 
 
 class RIFEConfig(BasePipelineConfig):
-    """Configuration for RIFE frame interpolation pipeline.
+    """RIFE-Buffered: Adaptive frame interpolation.
 
-    This pipeline uses RIFE HDv3 (Real-Time Intermediate Flow Estimation)
-    to double the frame rate of input video by generating intermediate frames.
-
-    Model weights are from Practical-RIFE v4.25:
-    https://github.com/hzwer/Practical-RIFE
+    Auto:   Set target FPS → system picks depth automatically.
+    Manual: Set interpolation depth → output = input × depth.
     """
 
     pipeline_id = "rife"
-    pipeline_name = "RIFE"
-    pipeline_description = (
-        "Frame interpolation pipeline using RIFE HDv3 to double the frame rate "
-        "of input video by generating intermediate frames."
-    )
+    pipeline_name = "RIFE-Buffered"
+    pipeline_description = "Auto = target FPS. Manual = pick depth."
     docs_url = "https://github.com/hzwer/Practical-RIFE"
     artifacts = [
         HuggingfaceRepoArtifact(
@@ -27,7 +37,27 @@ class RIFEConfig(BasePipelineConfig):
     ]
     supports_prompts = False
     modified = True
-
     usage = [UsageType.POSTPROCESSOR]
-
     modes = {"video": ModeDefaults(default=True)}
+
+    rife_mode: RifeMode = Field(
+        default=RifeMode.auto,
+        description="auto = target FPS, system picks depth. manual = you pick depth.",
+        json_schema_extra=ui_field_config(order=0, label="Mode", is_load_param=False),
+    )
+
+    # Auto mode: target FPS
+    target_fps: int = Field(
+        default=60,
+        ge=0,
+        le=240,
+        description="(Auto) Target output FPS. System picks closest depth.",
+        json_schema_extra=ui_field_config(order=1, label="Target FPS", is_load_param=False),
+    )
+
+    # Manual mode: interpolation depth
+    depth: InterpolationDepth = Field(
+        default=InterpolationDepth.x2,
+        description="(Manual) Interpolation multiplier.",
+        json_schema_extra=ui_field_config(order=2, label="Interpolation Depth", is_load_param=False),
+    )

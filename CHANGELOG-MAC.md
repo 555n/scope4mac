@@ -1,5 +1,27 @@
 # Scope4Mac Changelog
 
+## 0.7.0-mac (2026-03-17)
+
+### RIFE target FPS buffering
+- **Target FPS menu**: Set desired output framerate (24/30/60/120). RIFE auto-computes multiplier from measured input FPS.
+- **Recursive interpolation**: 2x/4x/8x via repeated midpoint subdivision. Each pass is a single batched model call.
+  - 2x: +6ms (28 FPS with 14 FPS input)
+  - 4x: +12ms (56 FPS with 14 FPS input)
+  - 8x: +21ms (112 FPS with 14 FPS input)
+- **Schema-driven UI**: `target_fps` runtime parameter auto-renders in postprocessor settings panel. No custom frontend code.
+- **MPS autocast fix**: float16 autocast on MPS (was defaulting to float32, triggering warning)
+
+### GPU-native turbo4mac path — 14 FPS
+- **Fixed noise bug**: Low-level GPU-native path now produces correct output
+  - Root cause: scheduler `_step_index` not reset between frames + input normalization mismatch
+  - Fix: call `set_timesteps()` + `set_begin_index()` each frame, normalize input to [-1, 1]
+- **GPU-native path**: No PIL, no CPU round-trips. 14 FPS at 256x256 on M2 Max
+  - Tensor stays on MPS throughout: input → TAESD encode → UNet → TAESD decode → output
+  - `torch.mps.synchronize()` at frame boundary prevents async corruption
+  - F.interpolate for GPU-native resize (replaces PIL.resize)
+- **Dual path**: `use_gpu_native` load param (default True). PIL fallback still available.
+- **MPS env setup**: Pipeline auto-sets `PYTORCH_ENABLE_MPS_FALLBACK` and `PYTORCH_MPS_HIGH_WATERMARK_RATIO`
+
 ## 0.2.0-mac (2026-03-17)
 
 ### Critical: Inference now produces output

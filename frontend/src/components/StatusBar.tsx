@@ -83,14 +83,14 @@ export function StatusBar({
 
       {/* Centre: Memory gauge */}
       <div className="flex items-center justify-center flex-1">
-        <MemoryGauge hardwareInfo={hardwareInfo ?? null} refreshHardwareInfo={refreshHardwareInfo} />
+        {refreshHardwareInfo && <MemoryGauge hardwareInfo={hardwareInfo ?? null} refreshHardwareInfo={refreshHardwareInfo} />}
       </div>
 
       {/* Right: Metrics + version */}
       <div className="flex items-center gap-6">
         <MetricItem label="FPS" value={fpsValue} />
         <MetricItem label="Bitrate" value={bitrateValue} />
-        <span className="text-[10px] text-muted-foreground font-mono opacity-60">v0.6.0-mac</span>
+        <span className="text-[10px] text-muted-foreground font-mono opacity-60">v1.8.0-mac</span>
       </div>
     </div>
   );

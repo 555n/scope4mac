@@ -20,10 +20,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Default queue sizes (match pipeline_processor)
-# Use larger size for inter-pipeline queues so downstream can accumulate a full chunk
-DEFAULT_INPUT_QUEUE_MAXSIZE = 30
-DEFAULT_OUTPUT_QUEUE_MAXSIZE = 8
+# Real-time queue sizes — input small for low latency, output larger
+# for RIFE burst (8x produces 9 frames per call).
+DEFAULT_INPUT_QUEUE_MAXSIZE = 2
+DEFAULT_OUTPUT_QUEUE_MAXSIZE = 16
 
 
 @dataclass

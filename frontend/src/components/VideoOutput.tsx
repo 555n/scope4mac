@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Spinner } from "./ui/spinner";
+import { AquaWindow } from "./AquaWindow";
 import { PlayOverlay } from "./ui/play-overlay";
 
 interface VideoOutputProps {
@@ -45,12 +44,13 @@ export function VideoOutput({
   isPointerLocked = false,
   onRequestPointerLock,
   videoContainerRef,
-  videoScaleMode = "fit",
+  videoScaleMode: _videoScaleMode = "fit",
 }: VideoOutputProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const overlayTimeoutRef = useRef<number | null>(null);
 
   // Use external ref if provided, otherwise use internal
@@ -59,22 +59,24 @@ export function VideoOutput({
   useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
+      setHasFirstFrame(false); // reset on new stream
+    } else {
+      setHasFirstFrame(false);
     }
   }, [remoteStream]);
 
-  // Listen for video playing event to notify parent
+  // Listen for video playing event to notify parent + track first frame
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !remoteStream) return;
 
     const handlePlaying = () => {
+      setHasFirstFrame(true);
       onVideoPlaying?.();
     };
 
-    // Check if video is already playing when effect runs
-    // This handles cases where the video was already playing before the callback was set
     if (!video.paused && video.currentTime > 0 && !video.ended) {
-      // Use setTimeout to avoid calling during render
+      setHasFirstFrame(true);
       setTimeout(() => onVideoPlaying?.(), 0);
     }
 
@@ -159,24 +161,17 @@ export function VideoOutput({
   }, []);
 
   return (
-    <Card className={`h-full flex flex-col ${className}`}>
-      <CardHeader className="flex-shrink-0">
-        <CardTitle className="text-base font-medium">Video Output</CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
+    <AquaWindow title="Video Output" className={`h-full flex-col ${className}`}>
+      <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "#e8e8e8" }}>
         {remoteStream ? (
           <div
             ref={containerRef}
-            className="relative w-full h-full cursor-pointer flex items-center justify-center"
+            className="absolute inset-0 cursor-pointer"
             onClick={handleVideoClick}
           >
             <video
               ref={videoRef}
-              className={
-                videoScaleMode === "fit"
-                  ? "w-full h-full object-contain"
-                  : "max-w-full max-h-full object-contain"
-              }
+              className="w-full h-full object-cover"
               autoPlay
               muted
               playsInline
@@ -195,51 +190,105 @@ export function VideoOutput({
                 </div>
               </div>
             )}
-            {/* Controller Input Overlay - only show before pointer lock (browser shows ESC hint) */}
+            {/* Waiting for first frame — show until video actually plays */}
+            {!hasFirstFrame && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#e8e8e8] pointer-events-none z-10">
+                <img src="/happy-mac.svg" alt="" className="h-10 w-10 opacity-50" />
+                <p className="text-sm text-[#555]">Waiting for video...</p>
+                <div style={{
+                  width: 160, height: 16, borderRadius: 8,
+                  background: "linear-gradient(180deg, #e0e0e0 0%, #c8c8c8 50%, #d4d4d4 100%)",
+                  border: "1px solid rgba(0,0,0,0.2)", overflow: "hidden", position: "relative",
+                }}>
+                  <div style={{
+                    position: "absolute", inset: 2, borderRadius: 6,
+                    background: "linear-gradient(180deg, #6cb4f8 0%, #3d8be8 40%, #2a6fcc 60%, #4a9af0 100%)",
+                  }}>
+                    <div style={{
+                      position: "absolute", inset: 0, borderRadius: 6,
+                      backgroundImage: "repeating-linear-gradient(55deg, transparent, transparent 6px, rgba(255,255,255,0.15) 6px, rgba(255,255,255,0.15) 12px)",
+                      backgroundSize: "24px 100%",
+                      animation: "candybar-stripes 0.5s linear infinite",
+                    }} />
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Controller Input Overlay */}
             {supportsControllerInput && !isPointerLocked && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-lg text-sm pointer-events-none">
                 Click to enable controller input
               </div>
             )}
           </div>
-        ) : isDownloading ? (
-          <div className="text-center text-muted-foreground text-lg">
-            <Spinner size={24} className="mx-auto mb-3" />
-            <p>Downloading...</p>
-          </div>
-        ) : isCloudConnecting ? (
-          <div className="text-center text-muted-foreground text-lg">
-            <Spinner size={24} className="mx-auto mb-3" />
-            <p key={cloudConnectStage} className="animate-fade-in">
-              {cloudConnectStage || "Connecting to cloud..."}
+        ) : isDownloading || isCloudConnecting || isPipelineLoading || isConnecting ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-[#555]">
+            <img src="/happy-mac.svg" alt="" className="h-12 w-12 opacity-60" />
+            <p key={pipelineLoadingStage || cloudConnectStage || "load"} className="text-sm animate-fade-in">
+              {isDownloading ? "Downloading models..." :
+               isCloudConnecting ? (cloudConnectStage || "Connecting to cloud...") :
+               isPipelineLoading ? (pipelineLoadingStage || "Loading pipeline...") :
+               "Connecting..."}
             </p>
-          </div>
-        ) : isPipelineLoading ? (
-          <div className="text-center text-muted-foreground text-lg">
-            <Spinner size={24} className="mx-auto mb-3" />
-            <p key={pipelineLoadingStage} className="animate-fade-in">
-              {pipelineLoadingStage || "Loading pipeline..."}
-            </p>
-          </div>
-        ) : isConnecting ? (
-          <div className="text-center text-muted-foreground text-lg">
-            <Spinner size={24} className="mx-auto mb-3" />
-            <p>Connecting...</p>
+            <div style={{
+              width: 200, height: 20, borderRadius: 10,
+              background: "linear-gradient(180deg, #e0e0e0 0%, #c8c8c8 50%, #d4d4d4 100%)",
+              border: "1px solid rgba(0,0,0,0.3)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 3px rgba(0,0,0,0.2)",
+              overflow: "hidden", position: "relative",
+            }}>
+              <div style={{
+                position: "absolute", inset: 2, borderRadius: 8,
+                background: "linear-gradient(180deg, #6cb4f8 0%, #3d8be8 40%, #2a6fcc 60%, #4a9af0 100%)",
+              }}>
+                <div style={{
+                  position: "absolute", inset: 0, borderRadius: 8,
+                  backgroundImage: "repeating-linear-gradient(55deg, transparent, transparent 8px, rgba(255,255,255,0.15) 8px, rgba(255,255,255,0.15) 16px)",
+                  backgroundSize: "32px 100%",
+                  animation: "candybar-stripes 0.6s linear infinite",
+                }} />
+                <div style={{
+                  position: "absolute", top: 1, left: 4, right: 4, height: "45%",
+                  borderRadius: "6px 6px 50% 50%",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.05) 100%)",
+                }} />
+              </div>
+            </div>
+            <style>{`
+              @keyframes candybar-stripes { 0% { background-position: 0 0; } 100% { background-position: 32px 0; } }
+            `}</style>
           </div>
         ) : (
-          <div className="relative w-full h-full flex items-center justify-center">
-            {/* YouTube-style play button overlay */}
-            <PlayOverlay
-              isPlaying={false}
+          <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#e8e8e8" }}>
+            {/* QuickTime-style gel play button */}
+            <button
               onClick={onStartStream}
-              size="lg"
-              variant="themed"
               data-testid="start-stream-button"
               aria-label="Start stream"
-            />
+              style={{
+                width: 72, height: 72, borderRadius: "50%",
+                background: "linear-gradient(180deg, #6cb4f8 0%, #3d8be8 35%, #2a6fcc 65%, #4a9af0 100%)",
+                border: "2px solid rgba(0,0,0,0.25)",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", position: "relative", overflow: "hidden",
+              }}
+              className="hover:brightness-110 active:brightness-90 transition-all active:scale-95"
+            >
+              {/* Gloss */}
+              <div style={{
+                position: "absolute", top: 2, left: "15%", right: "15%", height: "40%",
+                borderRadius: "50%",
+                background: "linear-gradient(180deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 100%)",
+              }} />
+              {/* Play triangle */}
+              <svg width="28" height="32" viewBox="0 0 28 32" style={{ marginLeft: 4, position: "relative", zIndex: 1 }}>
+                <polygon points="0,0 28,16 0,32" fill="white" />
+              </svg>
+            </button>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </AquaWindow>
   );
 }

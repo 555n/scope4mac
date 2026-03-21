@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { CardContent } from "./ui/card";
+import { AquaWindow } from "./AquaWindow";
 import {
   Select,
   SelectContent,
@@ -98,7 +99,7 @@ function PluginConfigFields({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-3 space-y-3">
+    <div className="rounded-lg border bg-[#f0f0f0] p-3 space-y-3">
       {primitiveFields.map(({ key, prop, ui, fieldType }) => {
         const value = overrides?.[key] ?? prop.default;
         const isRuntimeParam = ui.is_load_param === false;
@@ -204,9 +205,9 @@ function ProcessorListSection({
         const processorOverrides = overrides?.[pid];
 
         return (
-          <div key={pid} className="rounded-lg border bg-card p-2 space-y-2">
+          <div key={pid} className="rounded-lg border bg-[#f0f0f0] p-2 space-y-2">
             <div className="flex items-center gap-1">
-              <span className="text-xs font-medium flex-1 truncate">{pid}</span>
+              <span className="text-xs font-medium flex-1 truncate">{allPipelines?.[pid]?.name || pid}</span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -265,7 +266,7 @@ function ProcessorListSection({
           <SelectContent>
             {unselected.map(pid => (
               <SelectItem key={pid} value={pid}>
-                {pid}
+                {allPipelines?.[pid]?.name || pid}
               </SelectItem>
             ))}
           </SelectContent>
@@ -359,7 +360,7 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({
-  className = "",
+  className: _className = "",
   pipelines,
   pipelineId,
   onPipelineIdChange,
@@ -490,11 +491,8 @@ export function SettingsPanel({
   const currentPipeline = pipelines?.[pipelineId];
 
   return (
-    <Card className={`h-full flex flex-col ${className}`}>
-      <CardHeader className="flex-shrink-0">
-        <CardTitle className="text-base font-medium">Settings</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+    <AquaWindow title="Pipeline Settings" className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <CardContent className="space-y-6 overflow-y-auto flex-1 min-h-0 p-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
         <div className="space-y-2">
           <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
@@ -550,7 +548,7 @@ export function SettingsPanel({
         </div>
 
         {currentPipeline && (
-          <Card>
+          <div className="rounded-lg border bg-[#f0f0f0] p-4 space-y-2">
             <CardContent className="p-4 space-y-2">
               <div>
                 <h4 className="text-sm font-semibold">
@@ -625,7 +623,7 @@ export function SettingsPanel({
                 )}
               </div>
             </CardContent>
-          </Card>
+          </div>
         )}
 
         {/* Preprocessor List */}
@@ -832,7 +830,7 @@ export function SettingsPanel({
                     </div>
                   )}
                   {vaceEnabled && (
-                    <div className="rounded-lg border bg-card p-3 space-y-3">
+                    <div className="rounded-lg border bg-[#f0f0f0] p-3 space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <LabelWithTooltip
                           label="Use Input Video"
@@ -1234,7 +1232,7 @@ export function SettingsPanel({
           <MIDIMappingButton />
         </div>
       </CardContent>
-    </Card>
+    </AquaWindow>
   );
 }
 

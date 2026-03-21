@@ -1,7 +1,8 @@
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { CardContent } from "./ui/card";
 import { OutputSinkToggle } from "./OutputSinkToggle";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { SettingsState } from "../types";
+import { AquaWindow } from "./AquaWindow";
 
 interface OutputsPanelProps {
   className?: string;
@@ -26,10 +27,7 @@ export function OutputsPanel({
   isStreaming = false,
 }: OutputsPanelProps) {
   return (
-    <Card className={className}>
-      <CardHeader className="px-4 py-3">
-        <CardTitle className="text-base font-medium">Outputs</CardTitle>
-      </CardHeader>
+    <AquaWindow title="Outputs" className={className}>
       <CardContent className="px-4 pb-4 pt-0 space-y-3">
         {spoutAvailable && (
           <OutputSinkToggle
@@ -73,6 +71,6 @@ export function OutputsPanel({
           />
         )}
       </CardContent>
-    </Card>
+    </AquaWindow>
   );
 }

@@ -279,16 +279,26 @@ export function PromptInputWithTimeline({
       setIsLive(true);
       onLiveStateChange?.(true);
 
-      // Only create a new live prompt if there are no prompts at all in the timeline
       if (prompts.length === 0) {
+        // No prompts — create a new live block
         const streamStartedAgain = await initializeStream();
         if (streamStartedAgain) {
           const livePrompt = buildLivePromptFromCurrent(
             currentTime,
-            currentTime
+            currentTime + 0.01,
           );
           setPrompts(prevPrompts => [...prevPrompts, livePrompt]);
         }
+      } else {
+        // Prompts exist — promote the last one to live so it tracks the cursor
+        setPrompts(prevPrompts => {
+          const last = prevPrompts[prevPrompts.length - 1];
+          if (last.isLive) return prevPrompts;
+          return [
+            ...prevPrompts.slice(0, -1),
+            { ...last, isLive: true },
+          ];
+        });
       }
     }
 
@@ -427,7 +437,7 @@ export function PromptInputWithTimeline({
           id: `live-${Date.now()}`,
           text: promptItems.map(p => p.text).join(", "),
           startTime,
-          endTime: startTime,
+          endTime: startTime + 0.01,  // non-zero so block visible immediately
           isLive: true,
           prompts: promptItems.map(p => ({ text: p.text, weight: p.weight })),
           transitionSteps,

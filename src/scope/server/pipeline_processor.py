@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 2
 
-SLEEP_TIME = 0.01
+SLEEP_TIME = 0.001
 
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
@@ -56,6 +56,7 @@ class PipelineProcessor:
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
         self.node_id = node_id or pipeline_id
+        self.frame_ready_event: threading.Event | None = None  # set by frame_processor
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -69,8 +70,9 @@ class PipelineProcessor:
 
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
-        # Queue for parameter updates from external threads
-        self.parameters_queue = queue.Queue(maxsize=8)
+        # Latest-write-wins parameter updates (replaces bounded queue)
+        self._pending_params: dict[str, Any] = {}
+        self._pending_params_lock = threading.Lock()
 
         self.worker_thread: threading.Thread | None = None
         self.shutdown_event = threading.Event()
@@ -198,14 +200,9 @@ class PipelineProcessor:
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
     def update_parameters(self, parameters: dict[str, Any]):
-        """Update parameters that will be used in the next pipeline call."""
-        try:
-            self.parameters_queue.put_nowait(parameters)
-        except queue.Full:
-            logger.info(
-                f"Parameter queue full for {self.pipeline_id}, dropping parameter update"
-            )
-            return False
+        """Update parameters — latest-write-wins, never drops."""
+        with self._pending_params_lock:
+            self._pending_params.update(parameters)
 
     def worker_loop(self):
         """Main worker loop that processes frames."""
@@ -286,48 +283,66 @@ class PipelineProcessor:
 
     def process_chunk(self):
         """Process a single chunk of frames."""
-        # Check if there are new parameters
-        try:
-            new_parameters = self.parameters_queue.get_nowait()
-            if new_parameters != self.parameters:
-                # Clear stale transition when new prompts arrive without transition
-                if (
-                    "prompts" in new_parameters
-                    and "transition" not in new_parameters
-                    and "transition" in self.parameters
-                ):
-                    self.parameters.pop("transition", None)
+        # Apply pending parameter updates (latest-write-wins)
+        with self._pending_params_lock:
+            new_parameters = self._pending_params.copy()
+            self._pending_params.clear()
 
-                # Update video mode if input_mode parameter changes
-                if "input_mode" in new_parameters:
-                    self._video_mode = new_parameters.get("input_mode") == "video"
+        if new_parameters:
+            # Clear stale transition when new prompts arrive without transition
+            if (
+                "prompts" in new_parameters
+                and "transition" not in new_parameters
+                and "transition" in self.parameters
+            ):
+                self.parameters.pop("transition", None)
 
-                # Accumulate ctrl_input: keys = latest, mouse = sum
-                if "ctrl_input" in new_parameters:
-                    if "ctrl_input" in self.parameters:
-                        existing = self.parameters["ctrl_input"]
-                        new_ctrl = new_parameters["ctrl_input"]
-                        new_parameters["ctrl_input"] = {
-                            "button": new_ctrl.get("button", []),
-                            "mouse": [
-                                existing.get("mouse", [0, 0])[0]
-                                + new_ctrl.get("mouse", [0, 0])[0],
-                                existing.get("mouse", [0, 0])[1]
-                                + new_ctrl.get("mouse", [0, 0])[1],
-                            ],
-                        }
+            # Update video mode if input_mode parameter changes
+            if "input_mode" in new_parameters:
+                self._video_mode = new_parameters.get("input_mode") == "video"
 
-                # Merge new parameters with existing ones
-                self.parameters = {**self.parameters, **new_parameters}
-        except queue.Empty:
-            pass
+            # Accumulate ctrl_input: keys = latest, mouse = sum
+            if "ctrl_input" in new_parameters:
+                if "ctrl_input" in self.parameters:
+                    existing = self.parameters["ctrl_input"]
+                    new_ctrl = new_parameters["ctrl_input"]
+                    new_parameters["ctrl_input"] = {
+                        "button": new_ctrl.get("button", []),
+                        "mouse": [
+                            existing.get("mouse", [0, 0])[0]
+                            + new_ctrl.get("mouse", [0, 0])[0],
+                            existing.get("mouse", [0, 0])[1]
+                            + new_ctrl.get("mouse", [0, 0])[1],
+                        ],
+                    }
+
+            # Merge new parameters with existing ones
+            self.parameters = {**self.parameters, **new_parameters}
 
         # Pause or resume the processing
         paused = self.parameters.pop("paused", None)
         if paused is not None and paused != self.paused:
-            # Reset so the next batch FPS sample doesn't span the pause/unpause gap
             self._last_batch_time = None
             self.paused = paused
+            # Flush all queues on pause/resume to prevent stale frame replay
+            with self.input_queue_lock:
+                for q in self.input_queues.values():
+                    while not q.empty():
+                        try:
+                            q.get_nowait()
+                        except Exception:
+                            break
+            for queues in self.output_queues.values():
+                for q in queues:
+                    while not q.empty():
+                        try:
+                            q.get_nowait()
+                        except Exception:
+                            break
+            # Reset RIFE sliding window state on resume
+            if not paused and hasattr(self.pipeline, 'reset'):
+                self.pipeline.reset()
+            logger.info("[PAUSE] %s queues flushed, paused=%s", self.pipeline_id, paused)
         if self.paused:
             self.shutdown_event.wait(SLEEP_TIME)
             return
@@ -437,7 +452,7 @@ class PipelineProcessor:
             if output is not None:
                 num_frames = output.shape[0]
 
-            logger.info(
+            logger.debug(
                 "[PROFILE] pipeline=%s process_chunk input_mode=%s frames_out=%s took=%.3fs",
                 self.pipeline_id,
                 call_params.get("input_mode"),
@@ -477,6 +492,10 @@ class PipelineProcessor:
                             logger.debug(
                                 f"Output queue full for {self.pipeline_id} port '{port}', dropping frame"
                             )
+
+            # Signal frame ready for event-driven transport
+            if self.frame_ready_event is not None and num_frames > 0:
+                self.frame_ready_event.set()
 
             # Track batch-level throughput for FPS calculation
             if output is not None and num_frames > 0:

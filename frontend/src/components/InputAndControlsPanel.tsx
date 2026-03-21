@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { CardContent } from "./ui/card";
+import { AquaWindow } from "./AquaWindow";
 import {
   Select,
   SelectContent,
@@ -259,6 +260,7 @@ export function InputAndControlsPanel({
     return _currentTime >= lastPrompt.endTime;
   };
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [mirrorCamera, setMirrorCamera] = useState(false);
 
   // Check if this pipeline supports multiple input modes
   const pipeline = pipelines?.[pipelineId];
@@ -313,12 +315,9 @@ export function InputAndControlsPanel({
   };
 
   return (
-    <Card className={`h-full flex flex-col ${className}`}>
-      <CardHeader className="flex-shrink-0">
-        <CardTitle className="text-base font-medium">
-          Input & Controls
-        </CardTitle>
-      </CardHeader>
+    <AquaWindow title="Input & Controls" className={`h-full flex flex-col ${className}`}>
+      <div className="flex-shrink-0">
+      </div>
       <CardContent className="space-y-4 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
         {/* Input Mode selector - only show for multi-mode pipelines */}
         {isMultiMode && (
@@ -592,13 +591,23 @@ export function InputAndControlsPanel({
                     <p className="text-xs mt-1">{error}</p>
                   </div>
                 ) : localStream ? (
+                  <>
                   <video
                     ref={videoRef}
                     className="w-full h-full object-cover"
+                    style={mirrorCamera ? { transform: "scaleX(-1)" } : undefined}
                     autoPlay
                     muted
                     playsInline
                   />
+                  <button
+                    onClick={() => setMirrorCamera(m => !m)}
+                    className="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded hover:bg-black/70 transition-colors"
+                    title={mirrorCamera ? "Unmirror" : "Mirror"}
+                  >
+                    {mirrorCamera ? "Mirror ON" : "Mirror"}
+                  </button>
+                  </>
                 ) : (
                   <div className="text-center text-muted-foreground text-sm p-4">
                     {mode === "camera" ? "Camera Preview" : "Video Preview"}
@@ -936,6 +945,6 @@ export function InputAndControlsPanel({
             );
           })()}
       </CardContent>
-    </Card>
+    </AquaWindow>
   );
 }

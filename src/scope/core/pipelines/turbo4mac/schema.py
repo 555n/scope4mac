@@ -10,64 +10,56 @@ from ..base_schema import (
 )
 
 
-# SD-Turbo model artifact (auto-downloaded by diffusers, declared for registry)
-SD_TURBO_ARTIFACT = HuggingfaceRepoArtifact(
-    repo_id="stabilityai/sd-turbo",
-    files=[],
-)
-
-# TAESD tiny autoencoder artifact (25x faster VAE decode)
-TAESD_ARTIFACT = HuggingfaceRepoArtifact(
-    repo_id="madebyollin/taesd",
-    files=[],
-)
+SD_TURBO_ARTIFACT = HuggingfaceRepoArtifact(repo_id="stabilityai/sd-turbo", files=[])
+TAESD_ARTIFACT = HuggingfaceRepoArtifact(repo_id="madebyollin/taesd", files=[])
 
 
 class Turbo4MacConfig(BasePipelineConfig):
-    """Configuration for Turbo4Mac pipeline.
-
-    Real-time SD-Turbo img2img for Apple Silicon. Uses adversarial diffusion
-    distillation for 1-step generation with no classifier-free guidance.
-    TAESD replaces the full VAE decoder for 25x faster decode (1.2M vs 49M params).
-    """
+    """Turbo4Mac: Real-time SD-Turbo img2img for Apple Silicon."""
 
     pipeline_id = "turbo4mac"
     pipeline_name = "Turbo4Mac"
-    pipeline_description = (
-        "Real-time SD-Turbo img2img for Apple Silicon. "
-        "1-step adversarial diffusion distillation, no CFG. "
-        "TAESD for fast decode."
-    )
-    pipeline_version = "1.0.0"
-    estimated_vram_gb = None  # Runs on anything with MPS or CPU
+    pipeline_description = "Real-time SD-Turbo img2img + TAESD for Apple Silicon."
+    pipeline_version = "2.0.0"
+    estimated_vram_gb = None
     supports_prompts = True
     modified = True
-
     artifacts = [SD_TURBO_ARTIFACT, TAESD_ARTIFACT]
-
     modes = {"video": ModeDefaults(default=True)}
 
-    # Load params — set at pipeline load time, not adjustable while streaming
+    # Load params
     height: int = height_field(default=256)
     width: int = width_field(default=256)
-    strength: float = Field(
-        default=0.9,
-        ge=0.1,
-        le=1.0,
-        description="Denoising strength. Lower preserves more of the input frame.",
-        json_schema_extra=ui_field_config(
-            order=1,
-            is_load_param=True,
-            label="Strength",
-        ),
+    use_gpu_native: bool = Field(
+        default=True,
+        description="GPU-native path.",
+        json_schema_extra=ui_field_config(order=1, is_load_param=True, label="GPU Native"),
     )
 
-    # Runtime params — adjustable while streaming
-    style_preset: str = Field(
-        default="none",
-        description="Style preset for prompt augmentation.",
-        json_schema_extra=ui_field_config(
-            order=10,
-            label="Style Preset",
-        ),
+    # Runtime params
+    strength: float = Field(
+        default=0.4,
+        ge=0.05,
+        le=0.95,
+        description="AI intensity. Low=subtle, high=heavy transform.",
+        json_schema_extra=ui_field_config(order=3, label="Strength"),
+    )
+    seed: int = Field(
+        default=42,
+        ge=0,
+        le=999999,
+        description="Noise seed. Fixed=stable, 0=random per frame.",
+        json_schema_extra=ui_field_config(order=5, label="Seed"),
+    )
+    seed_lfo: bool = Field(
+        default=False,
+        description="Auto-increment seed at clock rate.",
+        json_schema_extra=ui_field_config(order=6, label="Seed LFO"),
+    )
+    seed_lfo_ms: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        description="Seed increment interval in milliseconds.",
+        json_schema_extra=ui_field_config(order=7, label="LFO Rate (ms)"),
     )

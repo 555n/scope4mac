@@ -35,20 +35,16 @@ const createUpdateTimeFunction = (
 
     setCurrentTime(elapsed);
 
-    // Update live blocks to extend as time progresses
+    // Live block endTime is NOT mutated here every frame.
+    // The render layer uses currentTime directly for live block width.
     const currentPrompts = promptsRef.current;
-    const livePrompt = currentPrompts.find(p => p.isLive);
-    if (livePrompt) {
-      setPrompts(prevPrompts =>
-        prevPrompts.map(p =>
-          p.id === livePrompt.id ? { ...p, endTime: elapsed } : p
-        )
-      );
-    }
 
-    // Find active prompt and apply it only if it changed
+    // Find active prompt — live blocks extend to current time conceptually
     const activePrompt = currentPrompts.find(
-      prompt => elapsed >= prompt.startTime && elapsed <= prompt.endTime
+      prompt => {
+        if (prompt.isLive) return elapsed >= prompt.startTime;
+        return elapsed >= prompt.startTime && elapsed <= prompt.endTime;
+      }
     );
 
     // Only send update if the active prompt block OR its text has changed
@@ -77,11 +73,12 @@ const createUpdateTimeFunction = (
       const lastPrompt = currentPrompts[currentPrompts.length - 1];
 
       if (elapsed >= lastPrompt.endTime) {
-        // Make the last prompt live
+        // Mark last prompt as live — endTime NOT mutated per frame.
+        // Render layer uses currentTime for live block width.
         setPrompts(prevPrompts =>
           prevPrompts.map(p =>
             p.id === lastPrompt.id
-              ? { ...p, isLive: true, endTime: elapsed }
+              ? { ...p, isLive: true }
               : p
           )
         );

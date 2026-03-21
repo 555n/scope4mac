@@ -1,7 +1,7 @@
 {
   "name": "daydream-scope-desktop",
   "productName": "Daydream Scope4Mac",
-  "version": "0.6.0-mac",
+  "version": "1.8.0-mac",
   "description": "Daydream Scope4Mac",
   "main": ".vite/build/main.js",
   "scripts": {
