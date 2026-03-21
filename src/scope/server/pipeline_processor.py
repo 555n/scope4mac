@@ -57,6 +57,7 @@ class PipelineProcessor:
         self.pipeline_id = pipeline_id
         self.node_id = node_id or pipeline_id
         self.frame_ready_event: threading.Event | None = None  # set by frame_processor
+        self.tempo_sync = None  # set by frame_processor for beat state injection
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -394,6 +395,16 @@ class PipelineProcessor:
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
+
+            # Inject beat state from tempo sync (if active)
+            if self.tempo_sync is not None:
+                beat_state = self.tempo_sync.get_beat_state()
+                if beat_state is not None:
+                    call_params["bpm"] = beat_state.bpm
+                    call_params["beat_phase"] = beat_state.beat_phase
+                    call_params["bar_position"] = beat_state.bar_position
+                    call_params["beat_count"] = beat_state.beat_count
+                    call_params["is_playing"] = beat_state.is_playing
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init

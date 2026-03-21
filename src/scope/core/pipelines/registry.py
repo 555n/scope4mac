@@ -192,6 +192,7 @@ def _register_pipelines():
         ("optical_flow", ".optical_flow.pipeline", "OpticalFlowPipeline"),
         ("turbo4mac", ".turbo4mac.pipeline", "Turbo4MacPipeline"),
         ("bloom", ".bloom.pipeline", "BloomPipeline"),
+        ("beat-quantized", ".beat_quantized.pipeline", "BeatQuantizedPipeline"),
     ]
 
     # Try to import and register each pipeline
