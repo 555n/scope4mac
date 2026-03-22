@@ -281,6 +281,11 @@ export function TempoSyncSection({
             </div>
           </div>
 
+          <div className="flex items-center justify-between text-xs text-muted-foreground font-mono tabular-nums">
+            <span>Bar: {tempoState.barPosition.toFixed(2)} / {tempoState.beatsPerBar}</span>
+            <span>Beat: {tempoState.beatCount}</span>
+          </div>
+
           {onSetBpm && (
             <div className="flex items-center gap-2 pt-1">
               <input

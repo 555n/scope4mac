@@ -29,9 +29,9 @@ def get_beat_boundary(rate: str, beat_count: int, beats_per_bar: int) -> int:
         return beat_count
     elif rate == "bar":
         return beat_count // max(beats_per_bar, 1)
-    elif rate == "2_bar":
+    elif rate in ("2_bar", "2bar"):
         return beat_count // max(beats_per_bar * 2, 1)
-    elif rate == "4_bar":
+    elif rate in ("4_bar", "4bar"):
         return beat_count // max(beats_per_bar * 4, 1)
     return -1
 

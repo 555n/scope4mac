@@ -149,7 +149,7 @@ export function StreamPage() {
   } = useTempoSync();
   const [linkDrawerOpen, setLinkDrawerOpen] = useState(false);
   const [quantizeMode, setQuantizeMode] = useState("none");
-  const [lookaheadMs, setLookaheadMs] = useState(0);
+  const [lookaheadMs, setLookaheadMs] = useState(50);
   const [beatCacheResetRate, setBeatCacheResetRate] = useState("none");
   const [promptCycleRate, setPromptCycleRate] = useState("none");
   const [modulations, setModulations] = useState<ModulationsState>({});
@@ -479,6 +479,11 @@ export function StreamPage() {
         "reset_cache",
         "paused",
         "prompts",
+        "subdivision",
+        "lookahead_ms",
+        "seed_on_beat",
+        "strength_envelope",
+        "envelope_depth",
       ]);
       const overrideUpdates: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(params)) {
@@ -540,6 +545,29 @@ export function StreamPage() {
     peerConnectionRef,
     isStreaming,
   });
+
+  // Send beat-quantized preprocessor params to backend when they change
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    if (quantizeMode === "none") {
+      // Clear subdivision so pipeline_processor doesn't trigger beat-reactive cache reset
+      sendParameterUpdate({ subdivision: "" });
+      return;
+    }
+
+    const subdivisionMap: Record<string, string> = {
+      beat: "beat",
+      bar: "bar",
+      "2_bar": "2bar",
+      "4_bar": "4bar",
+    };
+
+    sendParameterUpdate({
+      subdivision: subdivisionMap[quantizeMode] || "beat",
+      lookahead_ms: lookaheadMs,
+    });
+  }, [quantizeMode, lookaheadMs, isStreaming, sendParameterUpdate]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);

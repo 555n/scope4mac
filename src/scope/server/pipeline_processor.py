@@ -58,6 +58,7 @@ class PipelineProcessor:
         self.node_id = node_id or pipeline_id
         self.frame_ready_event: threading.Event | None = None  # set by frame_processor
         self.tempo_sync = None  # set by frame_processor for beat state injection
+        self._last_beat_boundary = -1  # for beat-reactive cache reset
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -397,6 +398,7 @@ class PipelineProcessor:
             call_params = dict(self.parameters.items())
 
             # Inject beat state from tempo sync (if active)
+            beat_state = None
             if self.tempo_sync is not None:
                 beat_state = self.tempo_sync.get_beat_state()
                 if beat_state is not None:
@@ -406,6 +408,72 @@ class PipelineProcessor:
                     call_params["beat_count"] = beat_state.beat_count
                     call_params["is_playing"] = beat_state.is_playing
                     call_params["beats_per_bar"] = self.tempo_sync.beats_per_bar
+
+            # Beat-reactive modulation: on beat boundary crossing,
+            # inject strength pulse + seed jump for a visible "pop".
+            # Works with non-autoregressive pipelines (turbo4mac/SD-Turbo)
+            # that don't have KV cache. For Wan2.1 pipelines, also triggers
+            # cache reset for maximum discontinuity.
+            beat_subdivision = call_params.get("subdivision")
+            if not beat_subdivision:
+                # Subdivision cleared — reset boundary tracker to avoid
+                # stale boundary firing on re-enable
+                self._last_beat_boundary = -1
+            elif beat_state is not None and beat_state.is_playing:
+                from scope.server.tempo_sync import get_beat_boundary
+                import math
+
+                boundary = get_beat_boundary(
+                    beat_subdivision,
+                    beat_state.beat_count,
+                    self.tempo_sync.beats_per_bar,
+                )
+
+                is_new_boundary = (
+                    boundary != self._last_beat_boundary
+                    and self._last_beat_boundary >= 0
+                )
+
+                # Read UI-configurable beat modulation params
+                seed_on_beat = call_params.get("seed_on_beat", True)
+                if isinstance(seed_on_beat, str):
+                    seed_on_beat = seed_on_beat in ("true", "True", "1")
+                do_strength_envelope = call_params.get("strength_envelope", True)
+                if isinstance(do_strength_envelope, str):
+                    do_strength_envelope = do_strength_envelope in ("true", "True", "1")
+                envelope_depth = float(call_params.get("envelope_depth", 0.25))
+
+                if is_new_boundary:
+                    # Seed jump — force new noise pattern on the beat
+                    if seed_on_beat:
+                        current_seed = int(call_params.get("seed", 42))
+                        if current_seed > 0:
+                            call_params["seed"] = (current_seed + 997) % 1000000
+
+                    # Cache reset for autoregressive pipelines (Wan2.1)
+                    reset_cache = True
+                    self._pending_cache_init = True
+
+                self._last_beat_boundary = boundary
+
+                # Continuous strength envelope: peak on beat, decay between
+                if do_strength_envelope:
+                    beat_phase = beat_state.beat_phase
+                    bpb = self.tempo_sync.beats_per_bar
+                    if beat_subdivision in ("beat", "quarter"):
+                        phase = beat_phase
+                    elif beat_subdivision == "8th":
+                        phase = (beat_phase * 2) % 1.0
+                    elif beat_subdivision == "half":
+                        phase = ((beat_state.beat_count % 2) + beat_phase) / 2.0
+                    elif beat_subdivision in ("bar",):
+                        phase = beat_state.bar_position / max(bpb, 1)
+                    else:
+                        phase = beat_phase
+
+                    base_strength = float(call_params.get("strength", 0.4))
+                    envelope = 0.5 * (1.0 + math.cos(phase * math.pi))
+                    call_params["strength"] = base_strength + envelope_depth * envelope
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init

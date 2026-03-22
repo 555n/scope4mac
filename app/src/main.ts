@@ -946,7 +946,13 @@ app.on('ready', async () => {
       throw err;
     }
   } else {
-    logger.info('No setup needed');
+    logger.info('No setup needed, running uv sync to ensure extras are up to date...');
+    try {
+      await setupService.runUvSync();
+      logger.info('UV sync completed');
+    } catch (err) {
+      logger.warn('UV sync failed (non-fatal):', err);
+    }
   }
 
   // Check if server is already running before showing loading screen

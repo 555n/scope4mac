@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { AQUA_COLORS, AQUA_GRADIENTS, AQUA_SHADOWS } from "../lib/AquaStyles";
 import { TempoSyncSection } from "./settings/TempoSyncSection";
 import type { TempoState } from "../hooks/useTempoSync";
@@ -33,6 +33,9 @@ interface LinkDrawerProps {
   onPromptCycleRateChange?: (rate: string) => void;
 }
 
+const WINDOW_WIDTH = 300;
+const TITLE_BAR_HEIGHT = 24;
+
 export function LinkDrawer({
   open,
   onClose,
@@ -56,8 +59,19 @@ export function LinkDrawer({
   promptCycleRate,
   onPromptCycleRateChange,
 }: LinkDrawerProps) {
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const toggleRef = useRef<boolean>(false);
+  const windowRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ x: -1, y: -1 });
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+  // Initialize position to center-right on first open
+  useEffect(() => {
+    if (open && position.x === -1) {
+      setPosition({
+        x: window.innerWidth - WINDOW_WIDTH - 40,
+        y: 60,
+      });
+    }
+  }, [open, position.x]);
 
   // Close on Escape
   useEffect(() => {
@@ -69,56 +83,72 @@ export function LinkDrawer({
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  // Close on click outside — skip clicks during the same frame as open
-  useEffect(() => {
-    if (!open) {
-      toggleRef.current = false;
-      return;
-    }
-    toggleRef.current = true;
-    const handler = (e: MouseEvent) => {
-      if (toggleRef.current) {
-        toggleRef.current = false;
-        return;
-      }
-      if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+  // Drag handlers
+  const onTitleBarMouseDown = useCallback((e: React.MouseEvent) => {
+    // Don't drag if clicking the close button
+    if ((e.target as HTMLElement).closest("[data-close-button]")) return;
+    e.preventDefault();
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: position.x,
+      origY: position.y,
     };
-    window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
-  }, [open, onClose]);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dx = ev.clientX - dragRef.current.startX;
+      const dy = ev.clientY - dragRef.current.startY;
+      setPosition({
+        x: Math.max(0, Math.min(window.innerWidth - WINDOW_WIDTH, dragRef.current.origX + dx)),
+        y: Math.max(0, Math.min(window.innerHeight - TITLE_BAR_HEIGHT, dragRef.current.origY + dy)),
+      });
+    };
+
+    const onMouseUp = () => {
+      dragRef.current = null;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [position]);
+
+  if (!open) return null;
 
   return (
     <div
-      ref={drawerRef}
+      ref={windowRef}
       style={{
         position: "fixed",
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: 300,
-        zIndex: 50,
-        transform: open ? "translateX(0)" : "translateX(100%)",
-        transition: "transform 200ms ease-in-out",
-        pointerEvents: open ? "auto" : "none",
+        left: position.x,
+        top: position.y,
+        width: WINDOW_WIDTH,
+        zIndex: 10001,
         display: "flex",
         flexDirection: "column",
+        borderRadius: 8,
+        overflow: "hidden",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2)",
+        maxHeight: `calc(100vh - ${position.y}px - 20px)`,
+        WebkitAppRegion: "no-drag" as any,
       }}
     >
-      {/* Title bar — Aqua with pinstripe */}
+      {/* Title bar — Aqua with pinstripe, draggable */}
       <div
+        onMouseDown={onTitleBarMouseDown}
         style={{
           background: AQUA_GRADIENTS.brushedAluminum,
           borderBottom: `1px solid ${AQUA_COLORS.border}`,
-          borderLeft: `1px solid ${AQUA_COLORS.border}`,
-          borderTopLeftRadius: 6,
           padding: "0 8px",
           display: "flex",
           alignItems: "center",
-          height: 24,
+          height: TITLE_BAR_HEIGHT,
           flexShrink: 0,
           position: "relative",
+          cursor: "grab",
+          userSelect: "none",
         }}
       >
         {/* Pinstripe overlay */}
@@ -136,6 +166,7 @@ export function LinkDrawer({
 
         {/* Close dot (traffic light red) */}
         <div
+          data-close-button
           onClick={onClose}
           title="Close"
           style={{
@@ -213,10 +244,7 @@ export function LinkDrawer({
       <div
         className="dark"
         style={{
-          flex: 1,
           backgroundColor: "#1a1a1a",
-          borderLeft: `1px solid ${AQUA_COLORS.border}`,
-          boxShadow: `-4px 0 12px rgba(0,0,0,0.15)`,
           overflowY: "auto",
           padding: 16,
           color: "#e0e0e0",
