@@ -40,6 +40,10 @@ def __getattr__(name):
         from .rife.pipeline import RIFEPipeline
 
         return RIFEPipeline
+    elif name == "RIFEVarispeedPipeline":
+        from .rife_varispeed.pipeline import RIFEVarispeedPipeline
+
+        return RIFEVarispeedPipeline
     elif name == "ScribblePipeline":
         from .scribble.pipeline import ScribblePipeline
 
@@ -52,6 +56,10 @@ def __getattr__(name):
         from .optical_flow.pipeline import OpticalFlowPipeline
 
         return OpticalFlowPipeline
+    elif name == "LinkSyncPipeline":
+        from .link_sync.pipeline import LinkSyncPipeline
+
+        return LinkSyncPipeline
     # Config classes
     elif name == "BasePipelineConfig":
         from .base_schema import BasePipelineConfig
@@ -89,6 +97,10 @@ def __getattr__(name):
         from .rife.schema import RIFEConfig
 
         return RIFEConfig
+    elif name == "RIFEVarispeedConfig":
+        from .rife_varispeed.schema import RIFEVarispeedConfig
+
+        return RIFEVarispeedConfig
     elif name == "ScribbleConfig":
         from .scribble.schema import ScribbleConfig
 
@@ -97,6 +109,10 @@ def __getattr__(name):
         from .gray.schema import GrayConfig
 
         return GrayConfig
+    elif name == "LinkSyncConfig":
+        from .link_sync.schema import LinkSyncConfig
+
+        return LinkSyncConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -111,9 +127,11 @@ __all__ = [
     "VideoDepthAnythingPipeline",
     "ControllerVisualizerPipeline",
     "RIFEPipeline",
+    "RIFEVarispeedPipeline",
     "ScribblePipeline",
     "GrayPipeline",
     "OpticalFlowPipeline",
+    "LinkSyncPipeline",
     # Config classes
     "BasePipelineConfig",
     "LongLiveConfig",
@@ -124,6 +142,8 @@ __all__ = [
     "MemFlowConfig",
     "VideoDepthAnythingConfig",
     "RIFEConfig",
+    "RIFEVarispeedConfig",
     "ScribbleConfig",
     "GrayConfig",
+    "LinkSyncConfig",
 ]

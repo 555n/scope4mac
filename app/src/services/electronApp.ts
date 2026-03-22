@@ -342,8 +342,8 @@ export class ScopeElectronAppService {
         this.appState.mainWindow.loadURL(SERVER_CONFIG.url);
         this.appState.mainWindow.webContents.once('did-finish-load', () => {
           if (this.appState.mainWindow && !this.appState.mainWindow.isDestroyed()) {
-            // Inject draggable title bar CSS (required for hidden title bar)
-            this.injectDraggableTitleBarCSS(this.appState.mainWindow);
+            // Drag region handled by Header component — legacy injection disabled
+            // this.injectDraggableTitleBarCSS(this.appState.mainWindow);
           }
         });
       } catch (err) {

@@ -59,6 +59,8 @@ class PipelineProcessor:
         self.frame_ready_event: threading.Event | None = None  # set by frame_processor
         self.tempo_sync = None  # set by frame_processor for beat state injection
         self._last_beat_boundary = -1  # for beat-reactive cache reset
+        self._last_step = -1  # 16-step sequencer: last resolved step index
+        self._link_sync_metrics = None  # populated by Link Sync postprocessor
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -409,71 +411,10 @@ class PipelineProcessor:
                     call_params["is_playing"] = beat_state.is_playing
                     call_params["beats_per_bar"] = self.tempo_sync.beats_per_bar
 
-            # Beat-reactive modulation: on beat boundary crossing,
-            # inject strength pulse + seed jump for a visible "pop".
-            # Works with non-autoregressive pipelines (turbo4mac/SD-Turbo)
-            # that don't have KV cache. For Wan2.1 pipelines, also triggers
-            # cache reset for maximum discontinuity.
-            beat_subdivision = call_params.get("subdivision")
-            if not beat_subdivision:
-                # Subdivision cleared — reset boundary tracker to avoid
-                # stale boundary firing on re-enable
-                self._last_beat_boundary = -1
-            elif beat_state is not None and beat_state.is_playing:
-                from scope.server.tempo_sync import get_beat_boundary
-                import math
-
-                boundary = get_beat_boundary(
-                    beat_subdivision,
-                    beat_state.beat_count,
-                    self.tempo_sync.beats_per_bar,
-                )
-
-                is_new_boundary = (
-                    boundary != self._last_beat_boundary
-                    and self._last_beat_boundary >= 0
-                )
-
-                # Read UI-configurable beat modulation params
-                seed_on_beat = call_params.get("seed_on_beat", True)
-                if isinstance(seed_on_beat, str):
-                    seed_on_beat = seed_on_beat in ("true", "True", "1")
-                do_strength_envelope = call_params.get("strength_envelope", True)
-                if isinstance(do_strength_envelope, str):
-                    do_strength_envelope = do_strength_envelope in ("true", "True", "1")
-                envelope_depth = float(call_params.get("envelope_depth", 0.25))
-
-                if is_new_boundary:
-                    # Seed jump — force new noise pattern on the beat
-                    if seed_on_beat:
-                        current_seed = int(call_params.get("seed", 42))
-                        if current_seed > 0:
-                            call_params["seed"] = (current_seed + 997) % 1000000
-
-                    # Cache reset for autoregressive pipelines (Wan2.1)
-                    reset_cache = True
-                    self._pending_cache_init = True
-
-                self._last_beat_boundary = boundary
-
-                # Continuous strength envelope: peak on beat, decay between
-                if do_strength_envelope:
-                    beat_phase = beat_state.beat_phase
-                    bpb = self.tempo_sync.beats_per_bar
-                    if beat_subdivision in ("beat", "quarter"):
-                        phase = beat_phase
-                    elif beat_subdivision == "8th":
-                        phase = (beat_phase * 2) % 1.0
-                    elif beat_subdivision == "half":
-                        phase = ((beat_state.beat_count % 2) + beat_phase) / 2.0
-                    elif beat_subdivision in ("bar",):
-                        phase = beat_state.bar_position / max(bpb, 1)
-                    else:
-                        phase = beat_phase
-
-                    base_strength = float(call_params.get("strength", 0.4))
-                    envelope = 0.5 * (1.0 + math.cos(phase * math.pi))
-                    call_params["strength"] = base_strength + envelope_depth * envelope
+            # Beat state is injected above and passed through to all pipeline
+            # nodes via call_params. Beat-synced frame gating is handled by
+            # the Ableton Link Sync postprocessor (link-sync node).
+            # Seed/strength modulation is CUDA-only (not implemented on MPS).
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
@@ -526,6 +467,14 @@ class PipelineProcessor:
                 transition = call_params.get("transition")
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
+
+            # Extract Link Sync metrics (if postprocessor provides them)
+            link_metrics = output_dict.get("_link_sync_metrics")
+            if link_metrics:
+                self._link_sync_metrics = link_metrics
+                # Push to tempo_sync for inclusion in 15Hz data channel updates
+                if self.tempo_sync is not None:
+                    self.tempo_sync.link_sync_metrics = link_metrics
 
             output = output_dict.get("video")
             num_frames = 0

@@ -2065,12 +2065,58 @@ async def get_hardware_info(
             except Exception:
                 pass
 
+        # CPU utilization (macOS: top -l 1, fallback: psutil)
+        cpu_pct = None
+        try:
+            import subprocess as _sp
+            import re as _re
+            _top = _sp.run(
+                ["top", "-l", "1", "-n", "0", "-s", "0"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for _line in _top.stdout.split("\n"):
+                if "CPU usage" in _line:
+                    _idle = _re.search(r"([\d.]+)% idle", _line)
+                    if _idle:
+                        cpu_pct = round(100.0 - float(_idle.group(1)), 1)
+                    break
+        except Exception:
+            try:
+                import psutil
+                cpu_pct = psutil.cpu_percent(interval=0)
+            except Exception:
+                pass
+
+        # GPU utilization
+        gpu_pct = None
+        if torch.cuda.is_available():
+            try:
+                gpu_pct = float(torch.cuda.utilization(0))
+            except Exception:
+                pass
+        else:
+            # macOS: read from IOKit via ioreg
+            try:
+                import subprocess as _sp
+                import re as _re
+                _ioreg = _sp.run(
+                    ["ioreg", "-r", "-d", "1", "-c", "AGXAcceleratorG14X"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                _match = _re.search(r'"Device Utilization %"=(\d+)', _ioreg.stdout)
+                if _match:
+                    gpu_pct = float(_match.group(1))
+            except Exception:
+                pass
+
         return HardwareInfoResponse(
             vram_gb=vram_gb,
             mps_allocated_gb=mps_allocated_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
             syphon_available=is_syphon_output_available(),
+            cpu_percent=cpu_pct,
+            gpu_percent=gpu_pct,
         )
     except HTTPException:
         raise

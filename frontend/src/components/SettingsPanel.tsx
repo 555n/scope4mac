@@ -61,6 +61,7 @@ import {
   type SchemaComplexFieldContext,
 } from "./ComplexFields";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
+import { LinkSyncPanel } from "./LinkSyncPanel";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -73,6 +74,7 @@ function PluginConfigFields({
   onChange,
   isStreaming = false,
   isLoading = false,
+  theme,
 }: {
   configSchema: import("../lib/schemaSettings").ConfigSchemaLike;
   inputMode?: InputMode;
@@ -203,11 +205,20 @@ function ProcessorListSection({
           | import("../lib/schemaSettings").ConfigSchemaLike
           | undefined;
         const processorOverrides = overrides?.[pid];
+        const isLinkSync = pid === "link-sync";
 
         return (
-          <div key={pid} className="rounded-lg border bg-[#f0f0f0] p-2 space-y-2">
+          <div key={pid} className="rounded-lg border p-2 space-y-2" style={isLinkSync ? {
+            background: "#2E3133",
+            borderColor: "#3F4446",
+          } : { background: "#f0f0f0" }}>
             <div className="flex items-center gap-1">
-              <span className="text-xs font-medium flex-1 truncate">{allPipelines?.[pid]?.name || pid}</span>
+              <span className="text-xs font-medium flex-1 truncate" style={isLinkSync ? {
+                color: "#F7A738",
+                fontFamily: "'Source Sans Pro', system-ui, sans-serif",
+                fontWeight: 600,
+                letterSpacing: "0.03em",
+              } : undefined}>{allPipelines?.[pid]?.name || pid}</span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -236,7 +247,19 @@ function ProcessorListSection({
                 <X className="h-3 w-3" />
               </Button>
             </div>
-            {configSchema && (
+            {isLinkSync ? (
+              <LinkSyncPanel
+                overrides={processorOverrides}
+                onChange={
+                  onOverrideChange
+                    ? (key, value, isRuntimeParam) =>
+                        onOverrideChange(pid, key, value, isRuntimeParam)
+                    : undefined
+                }
+                isStreaming={isStreaming}
+                isLoading={isLoading}
+              />
+            ) : configSchema ? (
               <PluginConfigFields
                 configSchema={configSchema}
                 inputMode={inputMode}
@@ -250,7 +273,7 @@ function ProcessorListSection({
                 isStreaming={isStreaming}
                 isLoading={isLoading}
               />
-            )}
+            ) : null}
           </div>
         );
       })}

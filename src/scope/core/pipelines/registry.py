@@ -187,12 +187,13 @@ def _register_pipelines():
             "ControllerVisualizerPipeline",
         ),
         ("rife", ".rife.pipeline", "RIFEPipeline"),
+        ("rife-varispeed", ".rife_varispeed.pipeline", "RIFEVarispeedPipeline"),
         ("scribble", ".scribble.pipeline", "ScribblePipeline"),
         ("gray", ".gray.pipeline", "GrayPipeline"),
         ("optical_flow", ".optical_flow.pipeline", "OpticalFlowPipeline"),
         ("turbo4mac", ".turbo4mac.pipeline", "Turbo4MacPipeline"),
         ("bloom", ".bloom.pipeline", "BloomPipeline"),
-        ("beat-quantized", ".beat_quantized.pipeline", "BeatQuantizedPipeline"),
+        ("link-sync", ".link_sync.pipeline", "LinkSyncPipeline"),
     ]
 
     # Try to import and register each pipeline

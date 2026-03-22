@@ -473,6 +473,21 @@ ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL, validateIPC(async (_event: any, url: 
   }
 }, IPC_CHANNELS.OPEN_EXTERNAL));
 
+// Window controls (frameless window)
+ipcMain.on('window-close', () => {
+  appState.mainWindow?.close();
+});
+ipcMain.on('window-minimize', () => {
+  appState.mainWindow?.minimize();
+});
+ipcMain.on('window-zoom', () => {
+  if (appState.mainWindow?.isMaximized()) {
+    appState.mainWindow.unmaximize();
+  } else {
+    appState.mainWindow?.maximize();
+  }
+});
+
 // Setup error callback for Python process
 function setupPythonProcessErrorHandler(): void {
   pythonProcessService.setErrorCallback((error: string) => {

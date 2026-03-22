@@ -218,6 +218,8 @@ export interface HardwareInfoResponse {
   spout_available: boolean;
   ndi_available: boolean;
   syphon_available: boolean;
+  cpu_percent: number | null;
+  gpu_percent: number | null;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {

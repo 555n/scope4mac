@@ -114,6 +114,11 @@ contextBridge.exposeInMainWorld('scope', {
 
   openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url),
 
+  // Window controls (frameless window)
+  windowClose: () => ipcRenderer.send('window-close'),
+  windowMinimize: () => ipcRenderer.send('window-minimize'),
+  windowZoom: () => ipcRenderer.send('window-zoom'),
+
   onAuthCallback: (callback: (data: { token: string; userId: string | null; state: string | null }) => void) => {
     // Validate callback
     if (typeof callback !== 'function') {

@@ -50,7 +50,7 @@ import { usePluginsContext } from "../contexts/PluginsContext";
 import { useServerInfoContext } from "../contexts/ServerInfoContext";
 import { useTempoSync } from "../hooks/useTempoSync";
 import { LinkDrawer } from "../components/LinkDrawer";
-import type { ModulationsState } from "../components/settings/ModulationSection";
+import { SequencerWindow } from "../components/SequencerWindow";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
@@ -148,11 +148,12 @@ export function StreamPage() {
     updateFromNotification: tempoUpdateFromNotification,
   } = useTempoSync();
   const [linkDrawerOpen, setLinkDrawerOpen] = useState(false);
-  const [quantizeMode, setQuantizeMode] = useState("none");
-  const [lookaheadMs, setLookaheadMs] = useState(50);
-  const [beatCacheResetRate, setBeatCacheResetRate] = useState("none");
-  const [promptCycleRate, setPromptCycleRate] = useState("none");
-  const [modulations, setModulations] = useState<ModulationsState>({});
+  const [sequencerOpen, setSequencerOpen] = useState(false);
+  const [quantizeMode, setQuantizeMode] = useState("beat");
+  const [frameOffsets, setFrameOffsets] = useState<[number, number, number, number]>([0, 0, 0, 0]);
+  const [barProgress, setBarProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [beatSyncedFps, setBeatSyncedFps] = useState(0);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelinesContext();
@@ -484,6 +485,9 @@ export function StreamPage() {
         "seed_on_beat",
         "strength_envelope",
         "envelope_depth",
+        "beat_steps",
+        "current_step",
+        "frame_offsets",
       ]);
       const overrideUpdates: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(params)) {
@@ -524,7 +528,19 @@ export function StreamPage() {
     sessionId,
   } = useUnifiedWebRTC({
     onParametersUpdated: applyBackendParamsToSettings,
-    onTempoUpdate: tempoUpdateFromNotification,
+    onTempoUpdate: useCallback((data: Record<string, unknown>) => {
+      if (typeof data.current_step === "number") {
+        setCurrentStep(data.current_step);
+      }
+      if (typeof data.bar_position === "number") {
+        const bpb = typeof data.beats_per_bar === "number" ? data.beats_per_bar : 4;
+        setBarProgress(Math.max(0, Math.min(1, (data.bar_position as number) / bpb)));
+      }
+      if (typeof data.beat_synced_fps === "number") {
+        setBeatSyncedFps(data.beat_synced_fps);
+      }
+      tempoUpdateFromNotification(data);
+    }, [tempoUpdateFromNotification]),
   });
 
   // Wrapper for sendParameterUpdate that also syncs frontend state
@@ -546,28 +562,14 @@ export function StreamPage() {
     isStreaming,
   });
 
-  // Send beat-quantized preprocessor params to backend when they change
+  // Send beat subdivision to backend (always "beat" when Link active)
   useEffect(() => {
     if (!isStreaming) return;
-
-    if (quantizeMode === "none") {
-      // Clear subdivision so pipeline_processor doesn't trigger beat-reactive cache reset
-      sendParameterUpdate({ subdivision: "" });
-      return;
-    }
-
-    const subdivisionMap: Record<string, string> = {
-      beat: "beat",
-      bar: "bar",
-      "2_bar": "2bar",
-      "4_bar": "4bar",
-    };
-
     sendParameterUpdate({
-      subdivision: subdivisionMap[quantizeMode] || "beat",
-      lookahead_ms: lookaheadMs,
+      subdivision: quantizeMode,
+      frame_offsets: frameOffsets,
     });
-  }, [quantizeMode, lookaheadMs, isStreaming, sendParameterUpdate]);
+  }, [quantizeMode, frameOffsets, isStreaming, sendParameterUpdate]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -2073,21 +2075,21 @@ export function StreamPage() {
       onPlayPauseToggle={handlePlayPauseToggle}
     >
       <div className="h-screen flex flex-col">
-        {/* Y2K Chrome Tribal Decorations */}
-        <ChromeTribalOverlay />
-
-        {/* Prefs bar — flush top-left, next to OS semaphore */}
-        <div className="shrink-0 flex items-center px-2 py-1" style={{ marginTop: -2 }}>
-          <div style={{ width: 70 }} /> {/* Space for OS traffic lights */}
-          <Header
-            onPipelinesRefresh={handlePipelinesRefresh}
-            cloudDisabled={isStreaming}
-            openSettingsTab={openSettingsTab}
-            onSettingsTabOpened={() => setOpenSettingsTab(null)}
-            linkEnabled={tempoState.enabled}
-            onLinkToggle={() => setLinkDrawerOpen(prev => !prev)}
-          />
-        </div>
+        {/* App header bar — flush top, before any overlays */}
+        <Header
+          onPipelinesRefresh={handlePipelinesRefresh}
+          cloudDisabled={isStreaming}
+          openSettingsTab={openSettingsTab}
+          onSettingsTabOpened={() => setOpenSettingsTab(null)}
+          linkEnabled={tempoState.enabled}
+          onLinkToggle={() => setLinkDrawerOpen(prev => !prev)}
+          fps={webrtcStats.fps}
+          bitrate={webrtcStats.bitrate}
+          unifiedMemoryUsed={hardwareInfo?.mps_allocated_gb ?? undefined}
+          unifiedMemoryTotal={hardwareInfo?.vram_gb ?? undefined}
+          cpuPercent={hardwareInfo?.cpu_percent ?? undefined}
+          gpuPercent={hardwareInfo?.gpu_percent ?? undefined}
+        />
 
         {/* Main Content Area */}
         <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
@@ -2490,21 +2492,17 @@ export function StreamPage() {
           onDisable={tempoDisable}
           onSetBpm={setSessionTempo}
           onRefreshSources={refreshTempoSources}
-          quantizeMode={quantizeMode}
-          onQuantizeModeChange={setQuantizeMode}
-          lookaheadMs={lookaheadMs}
-          onLookaheadMsChange={setLookaheadMs}
-          modulations={modulations}
-          onModulationsChange={setModulations}
-          configSchema={
-            pipelines?.[settings.pipelineId]?.configSchema as
-              | import("../lib/api").PipelineConfigSchema
-              | undefined
-          }
-          beatCacheResetRate={beatCacheResetRate}
-          onBeatCacheResetRateChange={setBeatCacheResetRate}
-          promptCycleRate={promptCycleRate}
-          onPromptCycleRateChange={setPromptCycleRate}
+          onOpenSequencers={() => setSequencerOpen(true)}
+        />
+
+        {/* Sequencer Window */}
+        <SequencerWindow
+          open={sequencerOpen}
+          onClose={() => setSequencerOpen(false)}
+          frameOffsets={frameOffsets}
+          onFrameOffsetsChange={setFrameOffsets}
+          barProgress={barProgress}
+          beatSyncActive={tempoState.enabled}
         />
 
         {/* Log Panel */}
@@ -2524,6 +2522,9 @@ export function StreamPage() {
           logUnreadCount={logUnreadCount}
           hardwareInfo={hardwareInfo}
           refreshHardwareInfo={refreshHardwareInfo}
+          linkActive={tempoState.enabled}
+          beatSyncedFps={beatSyncedFps}
+          appVersion={scopeVersion ?? "2.0.0-mac"}
         />
 
         {/* Download Dialog */}

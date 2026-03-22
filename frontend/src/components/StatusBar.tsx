@@ -11,6 +11,11 @@ interface StatusBarProps {
   logUnreadCount?: number;
   hardwareInfo?: HardwareInfoResponse | null;
   refreshHardwareInfo?: () => Promise<unknown>;
+  /** When Link is active, show beat-synced FPS separately */
+  beatSyncedFps?: number;
+  linkActive?: boolean;
+  /** App version from server */
+  appVersion?: string;
 }
 
 export function StatusBar({
@@ -22,6 +27,9 @@ export function StatusBar({
   logUnreadCount = 0,
   hardwareInfo,
   refreshHardwareInfo,
+  beatSyncedFps,
+  linkActive,
+  appVersion,
 }: StatusBarProps) {
   const MetricItem = ({
     label,
@@ -88,9 +96,12 @@ export function StatusBar({
 
       {/* Right: Metrics + version */}
       <div className="flex items-center gap-6">
-        <MetricItem label="FPS" value={fpsValue} />
+        <MetricItem label={linkActive ? "Gen FPS" : "FPS"} value={fpsValue} />
+        {linkActive && beatSyncedFps !== undefined && beatSyncedFps > 0 && (
+          <MetricItem label="Beat-Synced FPS" value={beatSyncedFps.toFixed(1)} />
+        )}
         <MetricItem label="Bitrate" value={bitrateValue} />
-        <span className="text-[10px] text-muted-foreground font-mono opacity-60">v1.9.0-mac</span>
+        <span className="text-[10px] text-muted-foreground font-mono opacity-60">{appVersion ? `v${appVersion}` : ""}</span>
       </div>
     </div>
   );
