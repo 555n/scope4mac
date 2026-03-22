@@ -87,8 +87,15 @@ export function TempoSyncSection({
   const [selectedMidiDevice, setSelectedMidiDevice] = useState<string>("");
   const [bpmInput, setBpmInput] = useState("120");
   const bpmInputFocusedRef = useRef(false);
-  const [beatsPerBar, setBeatsPerBar] = useState(4);
+  const [beatsPerBar, setBeatsPerBar] = useState(tempoState.beatsPerBar || 4);
   const sourcesLoaded = useRef(false);
+
+  // Sync beatsPerBar from server when tempo state updates (e.g., page refresh with active session)
+  useEffect(() => {
+    if (tempoState.enabled && tempoState.beatsPerBar) {
+      setBeatsPerBar(tempoState.beatsPerBar);
+    }
+  }, [tempoState.enabled, tempoState.beatsPerBar]);
 
   useEffect(() => {
     if (tempoState.bpm !== null && !bpmInputFocusedRef.current) {

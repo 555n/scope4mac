@@ -8,6 +8,7 @@ and bar position synchronized with other Link-enabled applications
 
 import asyncio
 import logging
+import math
 import threading
 import time
 
@@ -58,15 +59,18 @@ class LinkTempoSource(TempoSource):
             raise ImportError(
                 "aalink is not installed. Install with: uv sync --extra link"
             )
-        loop = asyncio.get_running_loop()
-        self._link = Link(self._initial_bpm, loop)
+        self._link = Link(self._initial_bpm)
         self._link.quantum = self._beats_per_bar
+        # Brief delay before enabling — workaround for aalink race condition
+        # where constructor BPM can overwrite an existing session tempo
+        await asyncio.sleep(0.2)
         self._link.enabled = True
+        self._link.start_stop_sync_enabled = True
 
         self._poll_task = asyncio.ensure_future(self._poll_loop())
         logger.info(
             f"Ableton Link started: bpm={self._initial_bpm}, "
-            f"peers={self._link.num_peers}"
+            f"quantum={self._beats_per_bar}, peers={self._link.num_peers}"
         )
 
     async def stop(self) -> None:
@@ -80,6 +84,9 @@ class LinkTempoSource(TempoSource):
 
         if self._link is not None:
             self._link.enabled = False
+            # Allow the scheduler thread to exit cleanly before dropping
+            # the reference — prevents segfault during C++ destructor
+            await asyncio.sleep(0.2)
             self._link = None
 
         logger.info("Ableton Link stopped")
@@ -92,10 +99,13 @@ class LinkTempoSource(TempoSource):
                     beat = self._link.beat
                     tempo = self._link.tempo
                     playing = self._link.playing
+                    # phase respects quantum (beats_per_bar) for correct
+                    # phase alignment across peers with different quanta
+                    phase = self._link.phase
 
                     beat_phase = beat % 1.0
-                    bar_position = beat % self._beats_per_bar
-                    beat_count = int(beat)
+                    bar_position = phase  # 0..quantum, quantum-aware
+                    beat_count = math.floor(beat)
 
                     state = BeatState(
                         bpm=tempo,

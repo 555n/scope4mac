@@ -41,6 +41,14 @@ interface UseUnifiedWebRTCOptions {
   onStreamStop?: () => void;
   /** Callback when parameters are updated externally (REST API, MCP, OSC) */
   onParametersUpdated?: (parameters: Record<string, unknown>) => void;
+  /** Callback when beat state update arrives from tempo sync (~15Hz) */
+  onTempoUpdate?: (data: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+  }) => void;
 }
 
 /**
@@ -189,6 +197,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 data.parameters
               );
               options?.onParametersUpdated?.(data.parameters);
+            }
+
+            // Handle tempo sync beat state push (~15Hz)
+            if (data.type === "tempo_update") {
+              options?.onTempoUpdate?.(data);
             }
           } catch (error) {
             console.error(

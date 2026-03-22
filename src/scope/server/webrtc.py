@@ -228,6 +228,12 @@ class WebRTCManager:
 
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
+            session.notification_sender = notification_sender
+
+            # Register with tempo sync for beat state push notifications
+            from .app import tempo_sync as _tempo_sync
+            if _tempo_sync is not None:
+                _tempo_sync.register_notification_session(notification_sender)
 
             video_track = VideoProcessingTrack(
                 pipeline_manager,
@@ -573,6 +579,12 @@ class WebRTCManager:
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
             logger.info(f"Removing session: {session}")
+
+            # Unregister from tempo sync notifications
+            if hasattr(session, "notification_sender"):
+                from .app import tempo_sync as _tempo_sync
+                if _tempo_sync is not None:
+                    _tempo_sync.unregister_notification_session(session.notification_sender)
 
             # Delete recording file when session ends
             if session.recording_manager:

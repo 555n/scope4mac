@@ -405,6 +405,7 @@ class PipelineProcessor:
                     call_params["bar_position"] = beat_state.bar_position
                     call_params["beat_count"] = beat_state.beat_count
                     call_params["is_playing"] = beat_state.is_playing
+                    call_params["beats_per_bar"] = self.tempo_sync.beats_per_bar
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init

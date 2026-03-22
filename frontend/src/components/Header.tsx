@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Settings, Cloud, CloudOff, Plug } from "lucide-react";
+import { Settings, Cloud, CloudOff, Plug, Link2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
@@ -14,6 +14,9 @@ interface HeaderProps {
   // External settings tab control
   openSettingsTab?: string | null;
   onSettingsTabOpened?: () => void;
+  // Link drawer
+  linkEnabled?: boolean;
+  onLinkToggle?: () => void;
 }
 
 export function Header({
@@ -22,6 +25,8 @@ export function Header({
   cloudDisabled,
   openSettingsTab,
   onSettingsTabOpened,
+  linkEnabled,
+  onLinkToggle,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -158,6 +163,19 @@ export function Header({
                       ? "Connecting..."
                       : "Enable Remote Inference"}
                 </span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onLinkToggle}
+                className={`hover:opacity-80 transition-opacity h-8 w-8 ${
+                  linkEnabled
+                    ? "text-green-500 opacity-100"
+                    : "text-muted-foreground opacity-80"
+                }`}
+                title={linkEnabled ? "Ableton Link (connected)" : "Ableton Link"}
+              >
+                <Link2 className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"

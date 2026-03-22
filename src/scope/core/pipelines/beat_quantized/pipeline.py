@@ -37,12 +37,18 @@ class BeatQuantizedPipeline(Pipeline):
         self._frame_count = 0
 
     def prepare(self, **kwargs):
-        return Requirements(input_size=1)
+        # Only request input frames when video input is actually wired.
+        # In text mode (no video kwarg), returning None lets the processor
+        # skip the frame-wait and call __call__ immediately.
+        if kwargs.get("video"):
+            return Requirements(input_size=1)
+        return None
 
     def __call__(self, **kwargs):
         video = kwargs.get("video")
         if video is None:
-            raise ValueError("No video input")
+            # No video input (text mode) — nothing to quantize, skip
+            return None
 
         self._frame_count += 1
 
@@ -69,13 +75,16 @@ class BeatQuantizedPipeline(Pipeline):
             self._last_hero = video
             return {"video": video}
 
+        # beats_per_bar from Link quantum (injected alongside beat state)
+        beats_per_bar = int(kwargs.get("beats_per_bar", 4))
+
         # Calculate current boundary index based on subdivision
-        boundary = self._get_boundary(subdivision, beat_count, beat_phase, bpm)
+        boundary = self._get_boundary(subdivision, beat_count, beat_phase, beats_per_bar)
 
         # Lookahead: are we close enough to the NEXT boundary?
         beat_duration_ms = 60000.0 / bpm
-        subdiv_ms = self._subdiv_duration_ms(subdivision, beat_duration_ms)
-        phase_within_subdiv = self._phase_within_subdiv(subdivision, beat_phase, bar_position)
+        subdiv_ms = self._subdiv_duration_ms(subdivision, beat_duration_ms, beats_per_bar)
+        phase_within_subdiv = self._phase_within_subdiv(subdivision, beat_count, beat_phase, bar_position, beats_per_bar)
         ms_until_next = subdiv_ms * (1.0 - phase_within_subdiv)
         is_near_boundary = ms_until_next <= lookahead_ms or boundary != self._last_beat_boundary
 
@@ -111,25 +120,23 @@ class BeatQuantizedPipeline(Pipeline):
                 return {"video": self._last_hero}
             return {"video": video}
 
-    def _get_boundary(self, subdivision, beat_count, beat_phase, bpm):
+    def _get_boundary(self, subdivision, beat_count, beat_phase, beats_per_bar):
         """Return an integer boundary index for the current position."""
         if subdivision == "8th":
             return beat_count * 2 + (1 if beat_phase >= 0.5 else 0)
-        elif subdivision == "quarter":
+        elif subdivision in ("quarter", "beat"):
             return beat_count
         elif subdivision == "half":
             return beat_count // 2
-        elif subdivision == "beat":
-            return beat_count
         elif subdivision == "bar":
-            return beat_count // 4
+            return beat_count // max(beats_per_bar, 1)
         elif subdivision == "2bar":
-            return beat_count // 8
+            return beat_count // max(beats_per_bar * 2, 1)
         elif subdivision == "4bar":
-            return beat_count // 16
+            return beat_count // max(beats_per_bar * 4, 1)
         return beat_count
 
-    def _subdiv_duration_ms(self, subdivision, beat_ms):
+    def _subdiv_duration_ms(self, subdivision, beat_ms, beats_per_bar):
         """Duration of one subdivision in ms."""
         if subdivision == "8th":
             return beat_ms / 2
@@ -138,23 +145,30 @@ class BeatQuantizedPipeline(Pipeline):
         elif subdivision == "half":
             return beat_ms * 2
         elif subdivision == "bar":
-            return beat_ms * 4
+            return beat_ms * beats_per_bar
         elif subdivision == "2bar":
-            return beat_ms * 8
+            return beat_ms * beats_per_bar * 2
         elif subdivision == "4bar":
-            return beat_ms * 16
+            return beat_ms * beats_per_bar * 4
         return beat_ms
 
-    def _phase_within_subdiv(self, subdivision, beat_phase, bar_position):
+    def _phase_within_subdiv(self, subdivision, beat_count, beat_phase, bar_position, beats_per_bar):
         """0.0-1.0 phase within the current subdivision."""
         if subdivision == "8th":
             return (beat_phase * 2) % 1.0
         elif subdivision in ("quarter", "beat"):
             return beat_phase
         elif subdivision == "half":
-            return (beat_phase / 2) % 1.0
+            # Combine beat parity with phase: odd beat = second half of the half-note
+            return ((beat_count % 2) + beat_phase) / 2.0
         elif subdivision == "bar":
-            return bar_position % 1.0
+            return bar_position / max(beats_per_bar, 1)
+        elif subdivision == "2bar":
+            bar_idx = beat_count % max(beats_per_bar * 2, 1)
+            return (bar_idx + beat_phase) / max(beats_per_bar * 2, 1)
+        elif subdivision == "4bar":
+            bar_idx = beat_count % max(beats_per_bar * 4, 1)
+            return (bar_idx + beat_phase) / max(beats_per_bar * 4, 1)
         return beat_phase
 
     def reset(self):

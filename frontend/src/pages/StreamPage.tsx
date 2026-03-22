@@ -48,6 +48,9 @@ import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
 import { useServerInfoContext } from "../contexts/ServerInfoContext";
+import { useTempoSync } from "../hooks/useTempoSync";
+import { LinkDrawer } from "../components/LinkDrawer";
+import type { ModulationsState } from "../components/settings/ModulationSection";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
@@ -131,6 +134,25 @@ export function StreamPage() {
       console.log("[StreamPage] Cloud mode enabled, ready:", isCloudReady);
     }
   }, [isDirectCloudMode, isCloudReady]);
+
+  // Tempo sync (Ableton Link / MIDI Clock)
+  const {
+    tempoState,
+    sources: tempoSources,
+    loading: tempoLoading,
+    error: tempoError,
+    enable: tempoEnable,
+    disable: tempoDisable,
+    setSessionTempo,
+    fetchSources: refreshTempoSources,
+    updateFromNotification: tempoUpdateFromNotification,
+  } = useTempoSync();
+  const [linkDrawerOpen, setLinkDrawerOpen] = useState(false);
+  const [quantizeMode, setQuantizeMode] = useState("none");
+  const [lookaheadMs, setLookaheadMs] = useState(0);
+  const [beatCacheResetRate, setBeatCacheResetRate] = useState("none");
+  const [promptCycleRate, setPromptCycleRate] = useState("none");
+  const [modulations, setModulations] = useState<ModulationsState>({});
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelinesContext();
@@ -497,6 +519,7 @@ export function StreamPage() {
     sessionId,
   } = useUnifiedWebRTC({
     onParametersUpdated: applyBackendParamsToSettings,
+    onTempoUpdate: tempoUpdateFromNotification,
   });
 
   // Wrapper for sendParameterUpdate that also syncs frontend state
@@ -2033,6 +2056,8 @@ export function StreamPage() {
             cloudDisabled={isStreaming}
             openSettingsTab={openSettingsTab}
             onSettingsTabOpened={() => setOpenSettingsTab(null)}
+            linkEnabled={tempoState.enabled}
+            onLinkToggle={() => setLinkDrawerOpen(prev => !prev)}
           />
         </div>
 
@@ -2424,6 +2449,35 @@ export function StreamPage() {
             />
           </div>
         </div>
+
+        {/* Link Drawer */}
+        <LinkDrawer
+          open={linkDrawerOpen}
+          onClose={() => setLinkDrawerOpen(false)}
+          tempoState={tempoState}
+          sources={tempoSources}
+          loading={tempoLoading}
+          error={tempoError}
+          onEnable={tempoEnable}
+          onDisable={tempoDisable}
+          onSetBpm={setSessionTempo}
+          onRefreshSources={refreshTempoSources}
+          quantizeMode={quantizeMode}
+          onQuantizeModeChange={setQuantizeMode}
+          lookaheadMs={lookaheadMs}
+          onLookaheadMsChange={setLookaheadMs}
+          modulations={modulations}
+          onModulationsChange={setModulations}
+          configSchema={
+            pipelines?.[settings.pipelineId]?.configSchema as
+              | import("../lib/api").PipelineConfigSchema
+              | undefined
+          }
+          beatCacheResetRate={beatCacheResetRate}
+          onBeatCacheResetRateChange={setBeatCacheResetRate}
+          promptCycleRate={promptCycleRate}
+          onPromptCycleRateChange={setPromptCycleRate}
+        />
 
         {/* Log Panel */}
         <LogPanel
