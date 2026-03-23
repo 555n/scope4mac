@@ -54,6 +54,8 @@ class RIFEPipeline(Pipeline):
         if v is None:
             raise ValueError("No video input")
 
+        # Tick BEFORE processing to measure input arrival rate (not including
+        # our own processing time, which would create a feedback loop)
         self._tick()
 
         if isinstance(v, list):
@@ -68,11 +70,17 @@ class RIFEPipeline(Pipeline):
         mode = str(kwargs.get("rife_mode", "auto"))
 
         if mode == "manual":
-            d = 2
+            d = 8  # default to 8x
+            raw_depth = kwargs.get("depth", 8)
             try:
-                d = int(kwargs.get("depth", 2))
+                # Handle enum strings like "x8", "x4" etc
+                if isinstance(raw_depth, str):
+                    cleaned = raw_depth.lstrip("x").lstrip("X")
+                    d = int(cleaned) if cleaned.isdigit() else 8
+                else:
+                    d = int(raw_depth)
             except (TypeError, ValueError):
-                pass
+                d = 8
             mult = self._p2(d)
         else:
             tfps = 60
@@ -88,14 +96,19 @@ class RIFEPipeline(Pipeline):
             return {"video": (f.float() / 255).unsqueeze(0)}
 
         pair = torch.stack([self._prev, f])
+        process_start = time.perf_counter()
         out = self.rife_interpolator.interpolate(pair, multiplier=mult)[1:]
+        process_time = time.perf_counter() - process_start
+        # Compensate _last_t so next _tick() doesn't count our processing time
+        self._last_t += process_time
         self._prev = f.clone()
         self._hint = min(60.0, max(self._fps_ema, 1.0) * mult)
         self._mult = mult
 
         if self._n % 30 == 1:
-            logger.info("[RIFE-%s] %dx in=%.1f→%.0f frames=%d",
-                        mode, mult, self._fps_ema, self._hint, out.shape[0])
+            logger.info("[RIFE-%s] %dx in=%.1f→%.0f frames=%d depth_raw=%s",
+                        mode, mult, self._fps_ema, self._hint, out.shape[0],
+                        kwargs.get("depth", "?"))
 
         return {"video": out.float() / 255}
 
@@ -109,6 +122,14 @@ class RIFEPipeline(Pipeline):
         self._n = 0
 
     def _tick(self):
+        """Measure input frame arrival rate.
+
+        Records time at START of __call__ (before processing). The interval
+        between starts is the true input rate, uncontaminated by our own
+        processing time. This prevents a feedback loop where higher multipliers
+        cause longer processing, which inflates the measured interval, which
+        raises the multiplier further.
+        """
         now = time.perf_counter()
         self._n += 1
         if self._last_t > 0:

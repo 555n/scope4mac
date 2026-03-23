@@ -106,8 +106,9 @@ export function FrameSyncopationTrack({
               background: ABLETON_COLORS.playGreen,
               opacity: 0.7,
               zIndex: 5,
+              // Match 15Hz update interval (66ms) for smooth motion
               // No transition on wrap (prevents elastic snap-back)
-              transition: isWrapping ? "none" : "left 0.06s linear",
+              transition: isWrapping ? "none" : "left 0.066s linear",
               pointerEvents: "none",
             }}
           />

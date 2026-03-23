@@ -841,11 +841,9 @@ class PipelineManager:
             "video-depth-anything",
             "controller-viz",
             "rife",
-            "rife-varispeed",
             "scribble",
             "gray",
             "optical-flow",
-            "link-sync",
         }
 
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
@@ -1276,34 +1274,6 @@ class PipelineManager:
                 dtype=torch.float16,
             )
             logger.info("RIFE pipeline initialized")
-            return pipeline
-        elif pipeline_id == "rife-varispeed":
-            from scope.core.pipelines import RIFEVarispeedPipeline
-
-            if stage_callback:
-                stage_callback("Initializing pipeline...")
-
-            config = OmegaConf.create({})
-            self._apply_load_params(config, load_params, default_height=512, default_width=512, default_seed=42)
-
-            pipeline = RIFEVarispeedPipeline(
-                config,
-                device=get_device(),
-                dtype=torch.float16,
-            )
-            logger.info("RIFE-Varispeed pipeline initialized")
-            return pipeline
-        elif pipeline_id == "link-sync":
-            from scope.core.pipelines import LinkSyncPipeline
-
-            if stage_callback:
-                stage_callback("Initializing pipeline...")
-
-            config = OmegaConf.create({})
-            self._apply_load_params(config, load_params, default_height=512, default_width=512, default_seed=42)
-
-            pipeline = LinkSyncPipeline(config)
-            logger.info("Ableton Link Sync pipeline initialized")
             return pipeline
         elif pipeline_id == "scribble":
             from scope.core.pipelines import ScribblePipeline

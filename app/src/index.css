@@ -33,7 +33,18 @@ body {
   padding: 0;
 }
 
-/* Drag region handled by Header component — no body::before needed */
+/* Draggable title bar region for macOS */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  -webkit-app-region: drag;
+  z-index: 10000;
+  pointer-events: auto;
+}
 
 /* Make all content non-draggable by default */
 #root,

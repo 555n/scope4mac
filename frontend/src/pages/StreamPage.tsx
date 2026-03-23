@@ -149,11 +149,15 @@ export function StreamPage() {
   } = useTempoSync();
   const [linkDrawerOpen, setLinkDrawerOpen] = useState(false);
   const [sequencerOpen, setSequencerOpen] = useState(false);
-  const [quantizeMode, setQuantizeMode] = useState("beat");
+  const [quantizeMode, setQuantizeMode] = useState("none");
   const [frameOffsets, setFrameOffsets] = useState<[number, number, number, number]>([0, 0, 0, 0]);
-  const [barProgress, setBarProgress] = useState(0);
-  const [currentStep, setCurrentStep] = useState(-1);
+  // Use refs for high-frequency tempo data to avoid 15Hz re-renders on StreamPage
+  const barProgressRef = useRef(0);
+  const currentStepRef = useRef(-1);
   const [beatSyncedFps, setBeatSyncedFps] = useState(0);
+  // Force sequencer repaint via lightweight counter (throttled)
+  const [tempoTick, setTempoTick] = useState(0);
+  const tempoTickRef = useRef(0);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelinesContext();
@@ -530,14 +534,19 @@ export function StreamPage() {
     onParametersUpdated: applyBackendParamsToSettings,
     onTempoUpdate: useCallback((data: Record<string, unknown>) => {
       if (typeof data.current_step === "number") {
-        setCurrentStep(data.current_step);
+        currentStepRef.current = data.current_step;
       }
       if (typeof data.bar_position === "number") {
         const bpb = typeof data.beats_per_bar === "number" ? data.beats_per_bar : 4;
-        setBarProgress(Math.max(0, Math.min(1, (data.bar_position as number) / bpb)));
+        barProgressRef.current = Math.max(0, Math.min(1, (data.bar_position as number) / bpb));
       }
       if (typeof data.beat_synced_fps === "number") {
         setBeatSyncedFps(data.beat_synced_fps);
+      }
+      // Throttle sequencer repaints to ~5Hz (every 3rd update at 15Hz)
+      tempoTickRef.current++;
+      if (tempoTickRef.current % 3 === 0) {
+        setTempoTick(tempoTickRef.current);
       }
       tempoUpdateFromNotification(data);
     }, [tempoUpdateFromNotification]),
@@ -562,14 +571,33 @@ export function StreamPage() {
     isStreaming,
   });
 
-  // Send beat subdivision to backend (always "beat" when Link active)
+  // Auto-enable beat quantize when Link is active
+  useEffect(() => {
+    if (tempoState.enabled && quantizeMode === "none") {
+      setQuantizeMode("beat");
+    }
+  }, [tempoState.enabled, quantizeMode]);
+
+  // Send beat-quantized preprocessor params to backend when they change
   useEffect(() => {
     if (!isStreaming) return;
+
+    if (quantizeMode === "none") {
+      sendParameterUpdate({ subdivision: "" });
+      return;
+    }
+
+    const subdivisionMap: Record<string, string> = {
+      beat: "beat",
+      bar: "bar",
+      "2_bar": "2bar",
+      "4_bar": "4bar",
+    };
+
     sendParameterUpdate({
-      subdivision: quantizeMode,
-      frame_offsets: frameOffsets,
+      subdivision: subdivisionMap[quantizeMode] || "beat",
     });
-  }, [quantizeMode, frameOffsets, isStreaming, sendParameterUpdate]);
+  }, [quantizeMode, isStreaming, sendParameterUpdate]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -2501,7 +2529,7 @@ export function StreamPage() {
           onClose={() => setSequencerOpen(false)}
           frameOffsets={frameOffsets}
           onFrameOffsetsChange={setFrameOffsets}
-          barProgress={barProgress}
+          barProgress={barProgressRef.current}
           beatSyncActive={tempoState.enabled}
         />
 

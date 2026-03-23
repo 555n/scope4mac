@@ -97,7 +97,6 @@ class TempoSync:
         self._notification_task: asyncio.Task | None = None
         self._notification_sessions: list[Any] = []
         self._notification_lock = threading.Lock()
-        self.link_sync_metrics: dict | None = None  # set by pipeline_processor
 
     @property
     def enabled(self) -> bool:
@@ -337,8 +336,6 @@ class TempoSync:
             while True:
                 beat_state = self.get_beat_state()
                 if beat_state is not None:
-                    bpb = max(self.beats_per_bar, 1)
-                    current_step = int(beat_state.bar_position / bpb * 16) % 16
                     message = {
                         "type": "tempo_update",
                         "bpm": round(beat_state.bpm, 2),
@@ -346,11 +343,7 @@ class TempoSync:
                         "bar_position": round(beat_state.bar_position, 4),
                         "beat_count": beat_state.beat_count,
                         "is_playing": beat_state.is_playing,
-                        "current_step": current_step,
                     }
-                    # Include Link Sync metrics if available
-                    if self.link_sync_metrics:
-                        message.update(self.link_sync_metrics)
                     dead: list[Any] = []
                     with self._notification_lock:
                         for sender in self._notification_sessions:

@@ -42,7 +42,7 @@ class RIFEConfig(BasePipelineConfig):
 
     rife_mode: RifeMode = Field(
         default=RifeMode.auto,
-        description="auto = target FPS, system picks depth. manual = you pick depth.",
+        description="Auto: system targets an FPS. Manual: you pick the multiplier.",
         json_schema_extra=ui_field_config(order=0, label="Mode", is_load_param=False),
     )
 
@@ -51,13 +51,13 @@ class RIFEConfig(BasePipelineConfig):
         default=60,
         ge=0,
         le=240,
-        description="(Auto) Target output FPS. System picks closest depth.",
-        json_schema_extra=ui_field_config(order=1, label="Target FPS", is_load_param=False),
+        description="(Auto mode) Target output FPS. Ignored in Manual mode.",
+        json_schema_extra=ui_field_config(order=1, label="Target FPS (Auto)", is_load_param=False),
     )
 
     # Manual mode: interpolation depth
     depth: InterpolationDepth = Field(
-        default=InterpolationDepth.x2,
-        description="(Manual) Interpolation multiplier.",
-        json_schema_extra=ui_field_config(order=2, label="Interpolation Depth", is_load_param=False),
+        default=InterpolationDepth.x8,
+        description="(Manual) Frame rate multiplier: 2x, 4x, 8x, or 16x input FPS.",
+        json_schema_extra=ui_field_config(order=2, label="Multiplier (Manual)", is_load_param=False),
     )
