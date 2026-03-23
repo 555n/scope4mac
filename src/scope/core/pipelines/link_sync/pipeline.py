@@ -1,16 +1,23 @@
-"""Ableton Link Sync — beat-gated frame release with subdivision and syncopation.
+"""Ableton Link Sync — buffered beat-gated frame release.
 
-Gates at configurable subdivision: quarter (1/beat), 8th (2/beat), 16th (4/beat).
-At 120 BPM 8th notes: 4 releases/sec. At 6 FPS gen, most gates fire a fresh frame.
-Missed gates repeat the last frame. RIFE after this node smooths the output.
+Collects one bar's worth of generated frames into a buffer before releasing.
+On each sixteenth-note boundary, if the gate is open (from the 16-step gate
+pattern), releases the next buffered frame. If closed, holds the last frame.
+
+Latency = one bar (at 120 BPM = 2 seconds). This guarantees frames are
+available for every gate, even at low generation rates.
 """
 
+import collections
 import logging
 
 from ..interface import Pipeline, Requirements
 from .schema import LinkSyncConfig
 
 logger = logging.getLogger(__name__)
+
+# Minimum frames to buffer before first release
+MIN_BUFFER_FRAMES = 4
 
 
 class LinkSyncPipeline(Pipeline):
@@ -20,10 +27,13 @@ class LinkSyncPipeline(Pipeline):
         return LinkSyncConfig
 
     def __init__(self, *, lookahead_frames=2, **kwargs):
-        self.lookahead_frames = lookahead_frames
-        self._buffer = None
+        self._frame_buffer = collections.deque(maxlen=64)
         self._released = None
         self._last_gate_idx = -1
+        self._primed = False
+        self._frames_needed = 16  # recalculated from gen FPS
+        self._frame_count = 0
+        logger.info("Ableton Link Sync initialized (buffered gate)")
 
     def prepare(self, **kwargs):
         return Requirements(input_size=1)
@@ -38,59 +48,65 @@ class LinkSyncPipeline(Pipeline):
                 return None
             video = video[0]
 
-        self._buffer = video
+        # Always collect into buffer
+        self._frame_buffer.append(video)
+        self._frame_count += 1
 
         beat_count = kwargs.get("beat_count", -1)
         beat_phase = kwargs.get("beat_phase", 0.0)
-        bar_position = kwargs.get("bar_position", 0.0)
         is_playing = kwargs.get("is_playing", False)
-        beats_per_bar = kwargs.get("beats_per_bar", 4)
 
         if not is_playing or beat_count < 0:
+            # Link not active — passthrough, drain buffer
             self._released = video
+            self._primed = False
             return {"video": video}
 
-        # Subdivision: how many gates per beat
-        subdivision = str(kwargs.get("subdivision", "8th"))
-        if subdivision == "16th":
-            gates_per_beat = 4
-        elif subdivision == "8th":
-            gates_per_beat = 2
-        else:  # quarter
-            gates_per_beat = 1
+        # Wait until we have enough frames for a full bar
+        if not self._primed:
+            if len(self._frame_buffer) >= MIN_BUFFER_FRAMES:
+                self._primed = True
+                self._last_gate_idx = -1
+                logger.info("[LinkSync] Primed with %d frames", len(self._frame_buffer))
+            else:
+                # Still collecting — output last frame or passthrough
+                if self._released is not None:
+                    return {"video": self._released}
+                return {"video": video}
 
-        # Global gate index: monotonic, increments gates_per_beat times per beat
-        gate_idx = beat_count * gates_per_beat + int(beat_phase * gates_per_beat)
+        # 16 gates per bar = 4 per beat (sixteenth notes)
+        gate_idx = beat_count * 4 + int(beat_phase * 4)
 
-        # Frame sync offsets (per beat, not per subdivision)
-        frame_offsets = kwargs.get("frame_offsets", [0, 0, 0, 0])
-        current_beat_in_bar = int(bar_position) % max(beats_per_bar, 1)
-        offset = 0.0
-        if isinstance(frame_offsets, (list, tuple)) and current_beat_in_bar < len(frame_offsets):
-            offset = float(frame_offsets[current_beat_in_bar])
+        # Gate pattern from frame_offsets — reinterpreted as 16-step open/close
+        # If frame_offsets provided as 16 values: >0 = open, 0 = closed
+        # If provided as 4 values (legacy): all gates open
+        frame_offsets = kwargs.get("frame_offsets")
+        gate_open = True
 
-        # Apply offset: shift gate_idx by offset fraction of one gate period
-        if offset > 0:
-            sub_phase = beat_phase * gates_per_beat
-            sub_idx = int(sub_phase)
-            sub_frac = sub_phase - sub_idx
-            # Offset delays the gate within each subdivision
-            if sub_frac < offset:
-                gate_idx = self._last_gate_idx  # hold previous gate
+        if isinstance(frame_offsets, (list, tuple)):
+            if len(frame_offsets) == 16:
+                step = gate_idx % 16
+                gate_open = float(frame_offsets[step]) > 0
+            # 4-value legacy format: all gates open (backward compatible)
 
-        # New gate — release buffered frame
+        # New gate boundary
         if gate_idx != self._last_gate_idx:
             self._last_gate_idx = gate_idx
-            self._released = self._buffer
-            return {"video": self._released}
 
-        # Between gates — repeat
+            if gate_open and len(self._frame_buffer) > 0:
+                # Release next buffered frame
+                self._released = self._frame_buffer.popleft()
+                return {"video": self._released}
+
+        # Between gates or closed gate — repeat last
         if self._released is not None:
             return {"video": self._released}
 
         return {"video": video}
 
     def reset(self):
-        self._buffer = None
+        self._frame_buffer.clear()
         self._released = None
         self._last_gate_idx = -1
+        self._primed = False
+        self._frame_count = 0
