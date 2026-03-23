@@ -27,6 +27,12 @@ class LinkSyncConfig(BasePipelineConfig):
         default=2,
         ge=1,
         le=8,
-        description="Frame buffer depth. Higher = more latency, more precise beat alignment. Min latency = lookahead / gen_fps.",
+        description="Frame buffer depth.",
         json_schema_extra=ui_field_config(order=0, label="Lookahead Frames", is_load_param=True),
+    )
+
+    subdivision: str = Field(
+        default="8th",
+        description="Gate rate: quarter = 1 per beat, 8th = 2 per beat, 16th = 4 per beat.",
+        json_schema_extra=ui_field_config(order=1, label="Gate Rate"),
     )
