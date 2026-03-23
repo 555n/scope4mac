@@ -2611,7 +2611,12 @@ export function StreamPage() {
           open={sequencerOpen}
           onClose={() => setSequencerOpen(false)}
           frameOffsets={frameOffsets}
-          onFrameOffsetsChange={setFrameOffsets}
+          onFrameOffsetsChange={(offsets: [number, number, number, number]) => {
+            setFrameOffsets(offsets);
+            if (isStreaming) {
+              sendParameterUpdate({ frame_offsets: offsets });
+            }
+          }}
           tempoAnchor={tempoAnchorRef}
           beatSyncActive={tempoState.enabled}
           tracks={sequencerTracks}

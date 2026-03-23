@@ -1,9 +1,8 @@
-"""Ableton Link Sync — beat-gated frame release.
+"""Ableton Link Sync — beat-gated frame release with syncopation.
 
 Buffers incoming frames and releases the most recent one on each beat
-boundary. Between beats, the last released frame is repeated. This locks
-the visual output to the tempo grid — at 120 BPM quarter-note gating,
-the display updates exactly 2 times per second regardless of generation rate.
+boundary. Frame Sync offsets displace the release point within each beat.
+Between release points, the last released frame is repeated.
 """
 
 import logging
@@ -24,9 +23,9 @@ class LinkSyncPipeline(Pipeline):
 
     def __init__(self, *, lookahead_frames=2, **kwargs):
         self.lookahead_frames = lookahead_frames
-        self._buffer = None          # most recent incoming frame
-        self._released = None        # last frame released on beat
-        self._last_beat_count = -1   # beat boundary tracker
+        self._buffer = None
+        self._released = None
+        self._last_release_beat = -1.0
         logger.info("Ableton Link Sync initialized (beat-gated frame release)")
 
     def prepare(self, **kwargs):
@@ -45,30 +44,48 @@ class LinkSyncPipeline(Pipeline):
         # Always buffer the latest frame
         self._buffer = video
 
-        # Read beat state from pipeline_processor injection
+        # Read beat state
         beat_count = kwargs.get("beat_count", -1)
+        beat_phase = kwargs.get("beat_phase", 0.0)
         is_playing = kwargs.get("is_playing", False)
+        beats_per_bar = kwargs.get("beats_per_bar", 4)
 
         if not is_playing or beat_count < 0:
-            # Link not active — passthrough
             self._released = video
             return {"video": video}
 
-        # Detect beat boundary crossing
-        if beat_count != self._last_beat_count:
-            # New beat — release the buffered frame
-            self._last_beat_count = beat_count
+        # Frame sync offsets: [beat1_offset, beat2_offset, beat3_offset, beat4_offset]
+        # Each offset is 0-0.75 beats of displacement from the downbeat
+        frame_offsets = kwargs.get("frame_offsets", [0, 0, 0, 0])
+
+        # Current position in the bar as a continuous beat number
+        bar_position = kwargs.get("bar_position", 0.0)
+
+        # Which beat of the bar we're on (0-indexed)
+        current_beat_in_bar = int(bar_position) % max(beats_per_bar, 1)
+        offset = 0.0
+        if isinstance(frame_offsets, (list, tuple)) and current_beat_in_bar < len(frame_offsets):
+            offset = float(frame_offsets[current_beat_in_bar])
+
+        # The release point for this beat = beat_count + offset
+        release_point = beat_count + offset
+
+        # Continuous position = beat_count + beat_phase
+        continuous_pos = beat_count + beat_phase
+
+        # Release when we cross the release point
+        if continuous_pos >= release_point and release_point > self._last_release_beat:
+            self._last_release_beat = release_point
             self._released = self._buffer
             return {"video": self._released}
 
-        # Between beats — repeat the last released frame
+        # Between release points — repeat last released frame
         if self._released is not None:
             return {"video": self._released}
 
-        # Fallback — no frame released yet, pass through
         return {"video": video}
 
     def reset(self):
         self._buffer = None
         self._released = None
-        self._last_beat_count = -1
+        self._last_release_beat = -1.0
