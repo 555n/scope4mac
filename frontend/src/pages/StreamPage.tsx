@@ -720,6 +720,9 @@ export function StreamPage() {
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
+    if (isStreaming) {
+      sendParameterUpdate({ prompts });
+    }
   };
 
   const buildSoloPromptItems = useCallback(
