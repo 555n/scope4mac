@@ -40,7 +40,7 @@ class Turbo4MacConfig(BasePipelineConfig):
     strength: float = Field(
         default=0.4,
         ge=0.05,
-        le=0.95,
+        le=1.0,
         description="AI intensity. Low=subtle, high=heavy transform.",
         json_schema_extra=ui_field_config(order=3, label="Strength"),
     )
@@ -62,4 +62,18 @@ class Turbo4MacConfig(BasePipelineConfig):
         le=1000,
         description="Seed increment interval in milliseconds.",
         json_schema_extra=ui_field_config(order=7, label="LFO Rate (ms)"),
+    )
+    seed_lfo_amount: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="LFO modulation depth. 0=none, 1=full range.",
+        json_schema_extra=ui_field_config(order=8, label="LFO Amount"),
+    )
+    seed_lfo_hz: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="LFO rate in Hz. 0=use millisecond mode.",
+        json_schema_extra=ui_field_config(order=9, label="LFO Hz"),
     )

@@ -75,6 +75,7 @@ class Turbo4MacPipeline(Pipeline):
         self._noise_seed = None
         self._seed_lfo_last = 0.0
         self._seed_lfo_counter = 0
+        self._seed_lfo_was_active = False
 
     def prepare(self, **kwargs) -> Requirements:
         if self.pipe is not None:
@@ -150,20 +151,35 @@ class Turbo4MacPipeline(Pipeline):
         t0 = time.perf_counter()
         self._frame_count += 1
 
-        strength = _cf(kwargs.get("strength", self.strength), 0.4, 0.1, 0.9)
+        strength = _cf(kwargs.get("strength", self.strength), 0.4, 0.05, 1.0)
         seed = _ci(kwargs.get("seed", 42), 42, 0, 999999)
 
-        # Seed LFO — auto-increment seed at configurable rate
+        # Seed LFO — time-based seed modulation
         raw_lfo = kwargs.get("seed_lfo", False)
         seed_lfo = raw_lfo is True or raw_lfo == "true" or raw_lfo == "True" or raw_lfo == 1
-        seed_lfo_ms = _ci(kwargs.get("seed_lfo_ms", 100), 100, 10, 1000)
-        if seed_lfo and seed > 0:
+
+        # Reset counter on LFO toggle off->on
+        if seed_lfo and not self._seed_lfo_was_active:
+            self._seed_lfo_counter = 0
+            self._seed_lfo_last = time.perf_counter()
+        self._seed_lfo_was_active = bool(seed_lfo)
+
+        if seed_lfo:
+            seed_lfo_hz = float(kwargs.get("seed_lfo_hz", 0.0))
+            seed_lfo_ms = float(kwargs.get("seed_lfo_ms", 100))
+            if seed_lfo_hz > 0:
+                seed_lfo_ms = 1000.0 / seed_lfo_hz
+            seed_lfo_amount = float(kwargs.get("seed_lfo_amount", 0.5))
+
             now = time.perf_counter()
             elapsed_ms = (now - self._seed_lfo_last) * 1000.0
             if elapsed_ms >= seed_lfo_ms:
                 self._seed_lfo_counter += 1
                 self._seed_lfo_last = now
-            seed = (seed + self._seed_lfo_counter) % 1000000
+
+            if seed_lfo_amount > 0 and self._seed_lfo_counter > 0:
+                offset = int(self._seed_lfo_counter * seed_lfo_amount * 10000)
+                seed = (seed + offset) % 1000000
 
         image = self._frame_to_tensor(kwargs.get("video"))
         t1 = time.perf_counter()
@@ -226,7 +242,7 @@ class Turbo4MacPipeline(Pipeline):
         """PIL fallback."""
         t0 = time.perf_counter()
         self._frame_count += 1
-        strength = _cf(kwargs.get("strength", self.strength), 0.4, 0.1, 0.9)
+        strength = _cf(kwargs.get("strength", self.strength), 0.4, 0.05, 1.0)
 
         video = kwargs.get("video")
         if video is None or (isinstance(video, list) and len(video) == 0):

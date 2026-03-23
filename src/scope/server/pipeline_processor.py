@@ -8,11 +8,13 @@ from collections import deque
 from typing import Any
 
 import torch
+from pydantic import TypeAdapter
 
 from scope.core.pipelines.controller import parse_ctrl_input
 
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
+from .step_sequencer import StepSequencerEngine
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,16 @@ class PipelineProcessor:
         self.current_output_fps = MAX_FPS
         self.output_fps_lock = threading.Lock()
 
+        # Input FPS tracking (frame arrival rate at queue boundary)
+        # Mirrors output tracking but measures when frames are dequeued,
+        # independent of pipeline processing time.
+        self._input_batch_samples: deque[tuple[int, float]] = deque(
+            maxlen=BATCH_FPS_SAMPLE_SIZE
+        )
+        self._last_input_time: float | None = None
+        self.current_input_fps: float = MAX_FPS
+        self._input_fps_lock = threading.Lock()
+
         self.paused = False
         # Input mode is signaled by the frontend at stream start
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
@@ -105,6 +117,9 @@ class PipelineProcessor:
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
+
+        # 16-step parameter sequencer
+        self.step_sequencer = StepSequencerEngine()
 
     def _resize_output_queue(self, port: str, target_size: int):
         """Resize output queues for a given port, transferring existing frames.
@@ -206,6 +221,32 @@ class PipelineProcessor:
         with self._pending_params_lock:
             self._pending_params.update(parameters)
 
+    def _coerce_schema_types(self, updated_keys: dict[str, Any]):
+        """Coerce updated parameter values through the pipeline's Pydantic schema.
+
+        JSON from the WebRTC data channel delivers all values as strings.
+        This validates each updated key against its schema field type,
+        converting e.g. string "8" → int enum value, "auto" → str enum.
+        Only touches keys present in both updated_keys and the schema.
+        """
+        if not hasattr(self.pipeline, "get_config_class"):
+            return
+        config_cls = self.pipeline.get_config_class()
+        if not hasattr(config_cls, "model_fields"):
+            return
+        for key in updated_keys:
+            if key not in config_cls.model_fields or key not in self.parameters:
+                continue
+            field = config_cls.model_fields[key]
+            annotation = field.annotation
+            if annotation is None:
+                continue
+            try:
+                adapter = TypeAdapter(annotation)
+                self.parameters[key] = adapter.validate_python(self.parameters[key])
+            except Exception:
+                pass
+
     def worker_loop(self):
         """Main worker loop that processes frames."""
         logger.info(f"Worker thread started for pipeline: {self.pipeline_id}")
@@ -265,6 +306,7 @@ class PipelineProcessor:
             frame = input_queue_ref.get_nowait()
             if i in indices:
                 video_frames.append(frame)
+        self._track_input_batch(len(video_frames))
         return video_frames
 
     def prepare_multi_chunk(
@@ -318,8 +360,19 @@ class PipelineProcessor:
                         ],
                     }
 
+            # Extract sequencer pattern before merge (not a pipeline param)
+            seq_pattern = new_parameters.pop("sequencer_pattern", None)
+            if seq_pattern is not None:
+                tracks = seq_pattern if isinstance(seq_pattern, list) else seq_pattern.get("tracks", [])
+                self.step_sequencer.update_pattern(tracks)
+
             # Merge new parameters with existing ones
             self.parameters = {**self.parameters, **new_parameters}
+
+            # Coerce parameter types through the pipeline's Pydantic schema.
+            # WebRTC data channel delivers JSON — all values arrive as strings/dicts.
+            # This converts e.g. "8" → InterpolationDepth.x8, "auto" → RifeMode.auto.
+            self._coerce_schema_types(new_parameters)
 
         # Pause or resume the processing
         paused = self.parameters.pop("paused", None)
@@ -397,6 +450,10 @@ class PipelineProcessor:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
 
+            # Inject measured input FPS for postprocessors (e.g. RIFE auto-multiplier)
+            with self._input_fps_lock:
+                call_params["input_fps"] = self.current_input_fps
+
             # Inject beat state from tempo sync (if active)
             beat_state = None
             if self.tempo_sync is not None:
@@ -457,7 +514,8 @@ class PipelineProcessor:
                 self._last_beat_boundary = boundary
 
                 # Continuous strength envelope: peak on beat, decay between
-                if do_strength_envelope:
+                # Skip if step sequencer owns strength
+                if do_strength_envelope and not self.step_sequencer.has_active_track("strength"):
                     beat_phase = beat_state.beat_phase
                     bpb = self.tempo_sync.beats_per_bar
                     if beat_subdivision in ("beat", "quarter"):
@@ -474,6 +532,15 @@ class PipelineProcessor:
                     base_strength = float(call_params.get("strength", 0.4))
                     envelope = 0.5 * (1.0 + math.cos(phase * math.pi))
                     call_params["strength"] = base_strength + envelope_depth * envelope
+
+            # 16-step sequencer: compute current step and apply overrides
+            if beat_state is not None and beat_state.is_playing:
+                bpb = self.tempo_sync.beats_per_bar if self.tempo_sync else 4
+                if bpb > 0:
+                    normalized = beat_state.bar_position / bpb
+                    current_step = int(normalized * 16) % 16
+                    call_params["current_step"] = current_step
+                    self.step_sequencer.apply(current_step, call_params)
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
@@ -648,6 +715,30 @@ class PipelineProcessor:
                 if total_time > 0:
                     fps = total_frames / total_time
                     self.current_output_fps = max(MIN_FPS, min(MAX_FPS, fps))
+
+    def _track_input_batch(self, num_frames: int):
+        """Track input frame arrival rate at the queue boundary.
+
+        Called from prepare_chunk() after frames are dequeued. Measures the
+        interval between successive dequeue operations, independent of
+        pipeline processing time. This provides an accurate input FPS
+        for downstream consumers like RIFE's auto-multiplier.
+        """
+        now = time.time()
+        with self._input_fps_lock:
+            if self._last_input_time is not None:
+                interval = now - self._last_input_time
+                if interval > 0:
+                    self._input_batch_samples.append((num_frames, interval))
+            self._last_input_time = now
+
+            if self._input_batch_samples:
+                total_frames = sum(n for n, _ in self._input_batch_samples)
+                total_time = sum(t for _, t in self._input_batch_samples)
+                if total_time > 0:
+                    self.current_input_fps = max(
+                        MIN_FPS, min(MAX_FPS, total_frames / total_time)
+                    )
 
     def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.

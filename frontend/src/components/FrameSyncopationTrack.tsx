@@ -3,36 +3,38 @@
  *
  * Each beat column has a draggable region. Solid yellow fill shows
  * displacement amount with a thick yellow line at the target edge.
- * Continuous (no snapping). Playhead wraps cleanly without snap-back.
+ * Continuous (no snapping).
+ *
+ * Playhead is driven at 60fps by useAnimatedPlayhead (rAF + BPM
+ * extrapolation from Link's linear timeline model). No CSS transitions,
+ * no React re-renders for animation.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, type RefObject } from "react";
 import { ABLETON_COLORS, ABLETON_FONTS } from "../lib/AbletonStyles";
+import { useAnimatedPlayhead, type TempoAnchor } from "../hooks/useAnimatedPlayhead";
 
 const TOOLTIP_TEXT =
   "Frame Syncopation \u2014 Drag to displace generated frames from beat onset.";
 
 interface FrameSyncopationTrackProps {
   offsets: [number, number, number, number];
-  barProgress: number;
+  tempoAnchor: RefObject<TempoAnchor>;
   active: boolean;
   onChange: (offsets: [number, number, number, number]) => void;
 }
 
 export function FrameSyncopationTrack({
   offsets,
-  barProgress,
+  tempoAnchor,
   active,
   onChange,
 }: FrameSyncopationTrackProps) {
   const trackRefs = useRef<(HTMLDivElement | null)[]>([]);
   const offsetsRef = useRef(offsets);
   offsetsRef.current = offsets;
-  const prevBarProgress = useRef(barProgress);
 
-  // Detect bar wrap (progress jumps backward by more than 0.5 = new bar)
-  const isWrapping = barProgress < prevBarProgress.current - 0.5;
-  prevBarProgress.current = barProgress;
+  const playheadRef = useAnimatedPlayhead(tempoAnchor, active);
 
   const startDrag = useCallback(
     (beatIdx: number, e: React.MouseEvent) => {
@@ -64,51 +66,60 @@ export function FrameSyncopationTrack({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ display: "flex", gap: 0, height: 56 }}>
+      {/* Left margin — aligned with StepSequencerTrack */}
       <div
-        title={TOOLTIP_TEXT}
         style={{
-          fontFamily: ABLETON_FONTS.ui,
-          fontSize: 10,
-          fontWeight: 600,
-          color: ABLETON_COLORS.textSecondary,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          paddingLeft: 2,
-          cursor: "default",
+          width: 60,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          paddingRight: 6,
         }}
       >
-        Frame Sync
+        <span
+          title={TOOLTIP_TEXT}
+          style={{
+            fontFamily: ABLETON_FONTS.ui,
+            fontSize: 9,
+            fontWeight: 600,
+            color: active ? ABLETON_COLORS.textSecondary : ABLETON_COLORS.textMuted,
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            cursor: "default",
+          }}
+        >
+          Frame
+        </span>
       </div>
 
       <div
         title={TOOLTIP_TEXT}
         style={{
+          flex: 1,
           display: "flex",
           position: "relative",
           background: ABLETON_COLORS.retroDisplayBg,
           border: `1px solid ${ABLETON_COLORS.border}`,
           borderRadius: 2,
-          height: 48,
+          height: 56,
           overflow: "hidden",
           cursor: "default",
         }}
       >
-        {/* Playhead — no transition on bar wrap, smooth otherwise */}
+        {/* Playhead — driven by rAF at 60fps, no CSS transition needed */}
         {active && (
           <div
+            ref={playheadRef}
             style={{
               position: "absolute",
-              left: `${barProgress * 100}%`,
+              left: "0%",
               top: 0,
               bottom: 0,
               width: 1,
               background: ABLETON_COLORS.playGreen,
               opacity: 0.7,
               zIndex: 5,
-              // Match 15Hz update interval (66ms) for smooth motion
-              // No transition on wrap (prevents elastic snap-back)
-              transition: isWrapping ? "none" : "left 0.066s linear",
               pointerEvents: "none",
             }}
           />
@@ -179,16 +190,16 @@ export function FrameSyncopationTrack({
                 />
               )}
 
-              {/* Thick bright yellow target line at fill edge */}
-              {fillPct > 0 && (
+              {/* Thick bright yellow target line — always visible */}
+              {(
                 <div
                   style={{
                     position: "absolute",
-                    left: `${fillPct}%`,
+                    left: fillPct > 0 ? `${fillPct}%` : "0",
                     top: 0,
                     bottom: 0,
                     width: 3,
-                    marginLeft: -1,
+                    marginLeft: fillPct > 0 ? -1 : 0,
                     background: active ? "#F7A738" : "#888",
                     zIndex: 3,
                     pointerEvents: "none",

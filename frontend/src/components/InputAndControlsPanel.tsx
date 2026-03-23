@@ -602,7 +602,7 @@ export function InputAndControlsPanel({
                   />
                   <button
                     onClick={() => setMirrorCamera(m => !m)}
-                    className="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded hover:bg-black/70 transition-colors"
+                    className="absolute bottom-1 left-1 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded hover:bg-black/70 transition-colors"
                     title={mirrorCamera ? "Unmirror" : "Mirror"}
                   >
                     {mirrorCamera ? "Mirror ON" : "Mirror"}
@@ -623,12 +623,12 @@ export function InputAndControlsPanel({
                       onChange={handleFileUpload}
                       className="hidden"
                       id="video-upload"
-                      disabled={isStreaming || isConnecting}
+                      disabled={isConnecting}
                     />
                     <label
                       htmlFor="video-upload"
                       className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                        isStreaming || isConnecting
+                        isConnecting
                           ? "opacity-50 cursor-not-allowed"
                           : "hover:bg-black/70 cursor-pointer"
                       }`}

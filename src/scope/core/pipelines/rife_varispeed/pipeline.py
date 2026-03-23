@@ -26,7 +26,7 @@ class RIFEVarispeedPipeline(Pipeline):
     def get_config_class(cls):
         return RIFEVarispeedConfig
 
-    def __init__(self, config, device=None, dtype=torch.float16):
+    def __init__(self, config=None, device=None, dtype=torch.float16, **kwargs):
         from ..rife.modules.interpolation import RIFEInterpolator
 
         self.device = device or (
@@ -57,17 +57,30 @@ class RIFEVarispeedPipeline(Pipeline):
 
         self._tick()
 
-        # Handle input format: list of [1,H,W,C] uint8 or float32 tensor
+        # Handle input format: list of [1,H,W,C] uint8, or a raw tensor (THWC)
         if isinstance(v, list):
             if len(v) == 0:
                 return None
             v = normalize_frame_sizes(v)
             v = preprocess_chunk(v, self.device, self.dtype)
-
-        f = postprocess_chunk(rearrange(v, "B C T H W -> B T C H W"))
-        f = (f * 255).clamp(0, 255).to(torch.uint8)
-        if f.dim() == 4:
-            f = f[0]
+            # v is now BCTHW [-1,1] — convert to THWC [0,255] uint8
+            f = postprocess_chunk(rearrange(v, "B C T H W -> B T C H W"))
+            f = (f * 255).clamp(0, 255).to(torch.uint8)
+            if f.dim() == 4:
+                f = f[0]
+        elif isinstance(v, torch.Tensor):
+            # Tensor from upstream pipeline — already THWC [0,1] float or [0,255] uint8
+            f = v.to(self.device)
+            if f.dim() == 5:
+                # [B,T,H,W,C] or similar — squeeze batch
+                f = f.squeeze(0)
+            if f.dtype != torch.uint8:
+                f = (f * 255).clamp(0, 255).to(torch.uint8)
+            # Ensure 3D [H,W,C] gets unsqueezed to [1,H,W,C]
+            if f.dim() == 3:
+                f = f.unsqueeze(0)
+        else:
+            return None
 
         target_fps = int(kwargs.get("target_fps", 24))
 

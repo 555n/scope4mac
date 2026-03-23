@@ -24,8 +24,8 @@ class LinkSyncPipeline(Pipeline):
     def get_config_class(cls):
         return LinkSyncConfig
 
-    def __init__(self, config, device=None, dtype=None):
-        self.lookahead_frames = getattr(config, "lookahead_frames", 2)
+    def __init__(self, *, lookahead_frames=2, **kwargs):
+        self.lookahead_frames = lookahead_frames
         logger.info("Ableton Link Sync initialized (passthrough, gate in output track)")
 
     def prepare(self, **kwargs):

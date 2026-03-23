@@ -97,6 +97,7 @@ class TempoSync:
         self._notification_task: asyncio.Task | None = None
         self._notification_sessions: list[Any] = []
         self._notification_lock = threading.Lock()
+        self._sequencer_values_getter: Any = None
 
     @property
     def enabled(self) -> bool:
@@ -336,6 +337,11 @@ class TempoSync:
             while True:
                 beat_state = self.get_beat_state()
                 if beat_state is not None:
+                    # Compute 16-step index from bar position
+                    bpb = self._beats_per_bar or 4
+                    normalized = beat_state.bar_position / bpb if bpb > 0 else 0
+                    current_step = int(normalized * 16) % 16
+
                     message = {
                         "type": "tempo_update",
                         "bpm": round(beat_state.bpm, 2),
@@ -343,7 +349,17 @@ class TempoSync:
                         "bar_position": round(beat_state.bar_position, 4),
                         "beat_count": beat_state.beat_count,
                         "is_playing": beat_state.is_playing,
+                        "beats_per_bar": self._beats_per_bar,
+                        "current_step": current_step,
                     }
+                    # Include sequencer computed values for real-time visualization
+                    if self._sequencer_values_getter is not None:
+                        try:
+                            seq_vals = self._sequencer_values_getter()
+                            if seq_vals:
+                                message["sequencer_values"] = seq_vals
+                        except Exception:
+                            pass
                     dead: list[Any] = []
                     with self._notification_lock:
                         for sender in self._notification_sessions:

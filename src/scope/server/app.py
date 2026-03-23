@@ -2065,12 +2065,42 @@ async def get_hardware_info(
             except Exception:
                 pass
 
+        # CPU: load average as percentage (instant, no subprocess)
+        cpu_pct = None
+        gpu_pct = None
+        try:
+            load1 = os.getloadavg()[0]
+            ncpu = os.cpu_count() or 1
+            cpu_pct = round(min(100.0, (load1 / ncpu) * 100), 1)
+        except Exception:
+            pass
+        # GPU: read actual Device Utilization from IOKit (macOS)
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["ioreg", "-r", "-c", "IOAccelerator"],
+                capture_output=True, text=True, timeout=1,
+            )
+            for line in result.stdout.splitlines():
+                if "Device Utilization %" in line:
+                    # "Device Utilization %"=42
+                    val = line.split("Device Utilization %")[1]
+                    val = val.split("=")[1].split(",")[0].split("}")[0].strip()
+                    gpu_pct = round(float(val), 1)
+                    break
+        except Exception:
+            # Fallback to memory pressure
+            if mps_allocated_gb is not None and vram_gb is not None and vram_gb > 0:
+                gpu_pct = round(min(100.0, (mps_allocated_gb / vram_gb) * 100), 1)
+
         return HardwareInfoResponse(
             vram_gb=vram_gb,
             mps_allocated_gb=mps_allocated_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
             syphon_available=is_syphon_output_available(),
+            cpu_percent=cpu_pct,
+            gpu_percent=gpu_pct,
         )
     except HTTPException:
         raise

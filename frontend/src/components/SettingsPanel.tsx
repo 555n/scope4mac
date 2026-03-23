@@ -164,7 +164,7 @@ function ProcessorListSection({
   isStreaming?: boolean;
   isLoading?: boolean;
 }) {
-  const disabled = isStreaming || isLoading;
+  const disabled = isLoading ?? false;
   const unselected = availablePipelines.filter(
     pid => !selectedIds.includes(pid)
   );

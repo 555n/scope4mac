@@ -2,8 +2,8 @@
  * LinkDrawer — Ableton Link connection window.
  *
  * OS X Aqua title bar + Ableton-styled body.
- * Stripped to essentials: source, BPM, beat display.
- * Sequencer controls moved to SequencerWindow.
+ * Auto-enables Link on open. Single interactive BPM display:
+ * double-click to type, drag vertically to adjust in real time.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -26,7 +26,6 @@ interface LinkDrawerProps {
   onDisable: () => void;
   onSetBpm?: (bpm: number) => void;
   onRefreshSources: () => void;
-  /** Show sequencer window */
   onOpenSequencers?: () => void;
 }
 
@@ -48,6 +47,152 @@ function BeatDot({ phase }: { phase: number }) {
   );
 }
 
+/**
+ * Interactive BPM display.
+ * - Shows current BPM as large mono text
+ * - Double-click to enter edit mode (type a value, Enter to confirm, Escape to cancel)
+ * - Click-drag vertically to adjust BPM in real time (1 BPM per 4px)
+ */
+function InteractiveBpm({
+  bpm,
+  onSetBpm,
+}: {
+  bpm: number;
+  onSetBpm: (bpm: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<{ startY: number; startBpm: number; lastSent: number } | null>(null);
+  const [dragBpm, setDragBpm] = useState<number | null>(null);
+
+  const commitEdit = () => {
+    const v = parseFloat(editValue);
+    if (v >= 20 && v <= 300) onSetBpm(v);
+    setEditing(false);
+  };
+
+  const handleDoubleClick = () => {
+    setEditValue(String(Math.round(bpm)));
+    setEditing(true);
+    requestAnimationFrame(() => inputRef.current?.select());
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (editing) return;
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startBpm: bpm, lastSent: bpm };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dy = dragRef.current.startY - ev.clientY;
+      const newBpm = Math.round(Math.max(20, Math.min(300, dragRef.current.startBpm + dy / 4)));
+      setDragBpm(newBpm);
+      // Throttle API calls — only send when value changes by >= 1 BPM
+      if (Math.abs(newBpm - dragRef.current.lastSent) >= 1) {
+        dragRef.current.lastSent = newBpm;
+        onSetBpm(newBpm);
+      }
+    };
+    const onUp = () => {
+      if (dragRef.current) {
+        // Send final value on release
+        const dy = dragRef.current.startY - 0; // unused, use lastSent
+        onSetBpm(dragRef.current.lastSent);
+      }
+      dragRef.current = null;
+      setDragBpm(null);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const displayBpm = dragBpm ?? bpm;
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <input
+          ref={inputRef}
+          type="number"
+          min={20}
+          max={300}
+          step={1}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitEdit();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          onBlur={commitEdit}
+          style={{
+            fontFamily: ABLETON_FONTS.mono,
+            fontSize: 28,
+            fontWeight: "bold",
+            color: ABLETON_COLORS.lcdFg,
+            background: "rgba(255,255,255,0.05)",
+            border: `1px solid ${ABLETON_COLORS.accent}`,
+            borderRadius: 2,
+            outline: "none",
+            width: 80,
+            lineHeight: 1,
+            padding: "2px 4px",
+            textAlign: "left",
+          }}
+        />
+        <span
+          style={{
+            fontFamily: ABLETON_FONTS.ui,
+            fontSize: 10,
+            color: ABLETON_COLORS.textSecondary,
+            textTransform: "uppercase",
+          }}
+        >
+          BPM
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        cursor: "ns-resize",
+        userSelect: "none",
+      }}
+      onDoubleClick={handleDoubleClick}
+      onMouseDown={handleMouseDown}
+    >
+      <span
+        style={{
+          fontFamily: ABLETON_FONTS.mono,
+          fontSize: 28,
+          fontWeight: "bold",
+          color: ABLETON_COLORS.lcdFg,
+          lineHeight: 1,
+        }}
+      >
+        {displayBpm.toFixed(1)}
+      </span>
+      <span
+        style={{
+          fontFamily: ABLETON_FONTS.ui,
+          fontSize: 10,
+          color: ABLETON_COLORS.textSecondary,
+          textTransform: "uppercase",
+        }}
+      >
+        BPM
+      </span>
+    </div>
+  );
+}
+
 export function LinkDrawer({
   open,
   onClose,
@@ -63,22 +208,15 @@ export function LinkDrawer({
 }: LinkDrawerProps) {
   const [selectedSource, setSelectedSource] = useState<"link" | "midi_clock">("link");
   const [selectedMidiDevice, setSelectedMidiDevice] = useState("");
-  const [bpmInput, setBpmInput] = useState("120");
-  const bpmFocused = useRef(false);
   const [beatsPerBar, setBeatsPerBar] = useState(tempoState.beatsPerBar || 4);
   const sourcesLoaded = useRef(false);
+  const autoEnabled = useRef(false);
 
   useEffect(() => {
     if (tempoState.enabled && tempoState.beatsPerBar) {
       setBeatsPerBar(tempoState.beatsPerBar);
     }
   }, [tempoState.enabled, tempoState.beatsPerBar]);
-
-  useEffect(() => {
-    if (tempoState.bpm !== null && !bpmFocused.current) {
-      setBpmInput(String(Math.round(tempoState.bpm)));
-    }
-  }, [tempoState.bpm]);
 
   useEffect(() => {
     if (sources && !sourcesLoaded.current) {
@@ -92,13 +230,27 @@ export function LinkDrawer({
     }
   }, [sources]);
 
+  // Auto-enable Link when drawer opens and sources are available
+  useEffect(() => {
+    if (open && !tempoState.enabled && !loading && !autoEnabled.current && sources) {
+      const linkAvail = sources.sources.link?.available;
+      if (linkAvail) {
+        autoEnabled.current = true;
+        onEnable({ source: "link", bpm: 120, beats_per_bar: beatsPerBar });
+      }
+    }
+    if (!open) {
+      autoEnabled.current = false;
+    }
+  }, [open, tempoState.enabled, loading, sources, beatsPerBar, onEnable]);
+
   const handleToggle = useCallback(() => {
     if (tempoState.enabled) {
       onDisable();
     } else {
       const req: TempoEnableRequest = {
         source: selectedSource,
-        bpm: parseFloat(bpmInput) || 120,
+        bpm: 120,
         beats_per_bar: beatsPerBar,
       };
       if (selectedSource === "midi_clock" && selectedMidiDevice) {
@@ -106,7 +258,7 @@ export function LinkDrawer({
       }
       onEnable(req);
     }
-  }, [tempoState.enabled, selectedSource, bpmInput, beatsPerBar, selectedMidiDevice, onEnable, onDisable]);
+  }, [tempoState.enabled, selectedSource, beatsPerBar, selectedMidiDevice, onEnable, onDisable]);
 
   const linkAvailable = sources?.sources.link?.available ?? false;
   const midiAvailable = sources?.sources.midi_clock?.available ?? false;
@@ -182,7 +334,7 @@ export function LinkDrawer({
             </div>
           )}
 
-          {/* BPM display + beat info (when connected) */}
+          {/* BPM + beat display (when connected) */}
           {tempoState.enabled && tempoState.bpm !== null && (
             <div
               style={{
@@ -192,30 +344,11 @@ export function LinkDrawer({
                 gap: 6,
               }}
             >
-              {/* BPM */}
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                <span
-                  style={{
-                    fontFamily: ABLETON_FONTS.mono,
-                    fontSize: 28,
-                    fontWeight: "bold",
-                    color: ABLETON_COLORS.lcdFg,
-                    lineHeight: 1,
-                  }}
-                >
-                  {tempoState.bpm.toFixed(1)}
-                </span>
-                <span
-                  style={{
-                    fontFamily: ABLETON_FONTS.ui,
-                    fontSize: 10,
-                    color: ABLETON_COLORS.textSecondary,
-                    textTransform: "uppercase",
-                  }}
-                >
-                  BPM
-                </span>
-              </div>
+              {/* Interactive BPM — double-click to edit, drag to adjust */}
+              <InteractiveBpm
+                bpm={tempoState.bpm}
+                onSetBpm={onSetBpm ?? (() => {})}
+              />
 
               {/* Beat indicator + bar/beat info */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -257,38 +390,6 @@ export function LinkDrawer({
                   {tempoState.numPeers} peer{tempoState.numPeers !== 1 ? "s" : ""}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Set BPM (when connected) */}
-          {tempoState.enabled && onSetBpm && (
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <input
-                type="number"
-                min={20}
-                max={300}
-                step={1}
-                value={bpmInput}
-                onChange={(e) => setBpmInput(e.target.value)}
-                onFocus={() => (bpmFocused.current = true)}
-                onBlur={() => (bpmFocused.current = false)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const v = parseFloat(bpmInput);
-                    if (v >= 20 && v <= 300) onSetBpm(v);
-                  }
-                }}
-                style={{ ...ABLETON_STYLES.textInput, width: 56, textAlign: "center" }}
-              />
-              <button
-                onClick={() => {
-                  const v = parseFloat(bpmInput);
-                  if (v >= 20 && v <= 300) onSetBpm(v);
-                }}
-                style={ABLETON_STYLES.button}
-              >
-                Set
-              </button>
             </div>
           )}
 

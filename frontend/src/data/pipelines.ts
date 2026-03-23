@@ -2,8 +2,8 @@ import type { InputMode } from "../types";
 
 // Default prompts by mode - used across all pipelines for consistency
 export const DEFAULT_PROMPTS: Record<InputMode, string> = {
-  text: "bright clouds on an acid iridescent sky",
-  video: "bright clouds on an acid iridescent sky",
+  text: "neon bacteria fungi bioluminescence",
+  video: "neon bacteria fungi bioluminescence",
 };
 
 export function getDefaultPromptForMode(mode: InputMode): string {

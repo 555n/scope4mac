@@ -999,6 +999,11 @@ class FrameProcessor:
             self._processors_by_node_id[proc.node_id] = proc
             proc.tempo_sync = _tempo_sync
 
+        # Wire sequencer values to tempo notification for real-time visualization
+        if _tempo_sync and self.pipeline_processors:
+            first_proc = self.pipeline_processors[0]
+            _tempo_sync._sequencer_values_getter = first_proc.step_sequencer.get_current_values
+
         # Start all processors
         for processor in self.pipeline_processors:
             processor.start()
@@ -1007,6 +1012,59 @@ class FrameProcessor:
             f"Created graph with {len(self.pipeline_processors)} processors, "
             f"sink={graph_run.sink_node_id}"
         )
+
+    def hot_swap_processors(self, new_pipeline_ids: list[str]) -> dict:
+        """Hot-swap the pipeline chain while the stream stays active.
+
+        Stops old processors, rebuilds the graph with new_pipeline_ids,
+        starts new processors. WebRTC connection and frame flow are preserved.
+        """
+        import time as _time
+
+        start = _time.time()
+        old_ids = list(self.pipeline_ids)
+
+        if not self.running:
+            raise RuntimeError("Stream not running")
+
+        # 0. Pre-load any pipelines that aren't loaded yet
+        for pid in new_pipeline_ids:
+            try:
+                self.pipeline_manager.get_pipeline_by_id(pid)
+            except Exception:
+                logger.info("[HOT-SWAP] Loading pipeline: %s", pid)
+                self.pipeline_manager._load_pipeline_by_id_sync(pid)
+
+        # 1. Stop all current processors
+        for proc in self.pipeline_processors:
+            proc.stop()
+
+        # 2. Pause frame flow
+        old_source_queues = self._graph_source_queues
+        self._graph_source_queues = []
+
+        # 3. Clear old processor references and rebuild graph
+        self._processors_by_node_id = {}
+        self.pipeline_ids = new_pipeline_ids
+        try:
+            self._setup_pipelines_sync()
+        except Exception as e:
+            # Rollback — restore old queues (processors already stopped)
+            self._graph_source_queues = old_source_queues
+            self.pipeline_ids = old_ids
+            logger.error("[HOT-SWAP] Failed: %s", e)
+            raise
+
+        elapsed = int((_time.time() - start) * 1000)
+        added = [p for p in new_pipeline_ids if p not in old_ids]
+        removed = [p for p in old_ids if p not in new_pipeline_ids]
+
+        logger.info(
+            "[HOT-SWAP] %dms — added=%s removed=%s chain=%s",
+            elapsed, added, removed, new_pipeline_ids,
+        )
+
+        return {"success": True, "added": added, "removed": removed, "time_ms": elapsed}
 
     def __enter__(self):
         self.start()

@@ -359,6 +359,20 @@ class WebRTCManager:
                         if "paused" in data and session.video_track:
                             session.video_track.pause(data["paused"])
 
+                        # Hot-swap pipeline chain if pipeline_ids sent
+                        if "pipeline_ids" in data and session.video_track and hasattr(
+                            session.video_track, "frame_processor"
+                        ):
+                            pipeline_ids = data.pop("pipeline_ids")
+                            if isinstance(pipeline_ids, list) and len(pipeline_ids) > 0:
+                                try:
+                                    result = session.video_track.frame_processor.hot_swap_processors(pipeline_ids)
+                                    logger.info(f"Hot-swap result: {result}")
+                                except Exception as e:
+                                    logger.error(f"Hot-swap failed: {e}")
+                            if not data:
+                                return
+
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
                             session.video_track, "frame_processor"

@@ -51,6 +51,9 @@ import { useServerInfoContext } from "../contexts/ServerInfoContext";
 import { useTempoSync } from "../hooks/useTempoSync";
 import { LinkDrawer } from "../components/LinkDrawer";
 import { SequencerWindow } from "../components/SequencerWindow";
+import type { TempoAnchor } from "../hooks/useAnimatedPlayhead";
+import { useStepSequencer } from "../hooks/useStepSequencer";
+import { useOscPaths } from "../hooks/useOscPaths";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
@@ -151,13 +154,24 @@ export function StreamPage() {
   const [sequencerOpen, setSequencerOpen] = useState(false);
   const [quantizeMode, setQuantizeMode] = useState("none");
   const [frameOffsets, setFrameOffsets] = useState<[number, number, number, number]>([0, 0, 0, 0]);
-  // Use refs for high-frequency tempo data to avoid 15Hz re-renders on StreamPage
-  const barProgressRef = useRef(0);
+  // Tempo anchor for rAF-driven playhead (updated at 15Hz, consumed at 60fps)
+  const tempoAnchorRef = useRef<TempoAnchor>({
+    barPosition: 0, bpm: 120, beatsPerBar: 4,
+    timestamp: 0, isPlaying: false,
+  });
   const currentStepRef = useRef(-1);
   const [beatSyncedFps, setBeatSyncedFps] = useState(0);
   // Force sequencer repaint via lightweight counter (throttled)
   const [tempoTick, setTempoTick] = useState(0);
   const tempoTickRef = useRef(0);
+  // Step sequencer state
+  const [sequencerValues, setSequencerValues] = useState<Record<string, number>>({});
+  const [currentStep, setCurrentStep] = useState(0);
+  // Seed LFO state
+  const [seedLfo, setSeedLfo] = useState(false);
+  const [seedLfoAmount, setSeedLfoAmount] = useState(0.5);
+  const [seedLfoMs, setSeedLfoMs] = useState(100);
+  const [seedLfoHz, setSeedLfoHz] = useState(0);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelinesContext();
@@ -492,6 +506,16 @@ export function StreamPage() {
         "beat_steps",
         "current_step",
         "frame_offsets",
+        "input_fps",
+        "input_mode",
+        "sequencer_pattern",
+        "sequencer_values",
+        "seed_lfo",
+        "seed_lfo_amount",
+        "seed_lfo_ms",
+        "seed_lfo_hz",
+        "current_step",
+        "pipeline_ids",
       ]);
       const overrideUpdates: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(params)) {
@@ -537,11 +561,23 @@ export function StreamPage() {
         currentStepRef.current = data.current_step;
       }
       if (typeof data.bar_position === "number") {
-        const bpb = typeof data.beats_per_bar === "number" ? data.beats_per_bar : 4;
-        barProgressRef.current = Math.max(0, Math.min(1, (data.bar_position as number) / bpb));
+        tempoAnchorRef.current = {
+          barPosition: data.bar_position as number,
+          bpm: typeof data.bpm === "number" ? data.bpm : tempoAnchorRef.current.bpm,
+          beatsPerBar: typeof data.beats_per_bar === "number" ? data.beats_per_bar : tempoAnchorRef.current.beatsPerBar,
+          timestamp: performance.now(),
+          isPlaying: data.is_playing !== false,
+        };
       }
       if (typeof data.beat_synced_fps === "number") {
         setBeatSyncedFps(data.beat_synced_fps);
+      }
+      // Sequencer real-time values + current step
+      if (typeof data.current_step === "number") {
+        setCurrentStep(data.current_step);
+      }
+      if (data.sequencer_values && typeof data.sequencer_values === "object") {
+        setSequencerValues(data.sequencer_values as Record<string, number>);
       }
       // Throttle sequencer repaints to ~5Hz (every 3rd update at 15Hz)
       tempoTickRef.current++;
@@ -561,6 +597,35 @@ export function StreamPage() {
     [sendParameterUpdateWebRTC, applyBackendParamsToSettings]
   );
 
+  // Step sequencer hook
+  const {
+    tracks: sequencerTracks,
+    setStepValue,
+    setTrackEnabled,
+    addDynamicTrack,
+    removeDynamicTrack,
+  } = useStepSequencer(sendParameterUpdate, isStreaming);
+
+  // Dynamic pipeline parameter discovery
+  // Dynamic tracks from active pre/post processor schemas
+  const processorIds = [
+    ...(settings.preprocessorIds ?? []),
+    ...(settings.postprocessorIds ?? []),
+  ];
+  const { activeParams } = useOscPaths(processorIds, pipelines ?? null);
+
+  // LFO parameter sender
+  const handleLfoChange = useCallback(
+    (params: Record<string, unknown>) => {
+      if ("seed_lfo" in params) setSeedLfo(!!params.seed_lfo);
+      if ("seed_lfo_amount" in params) setSeedLfoAmount(params.seed_lfo_amount as number);
+      if ("seed_lfo_ms" in params) setSeedLfoMs(params.seed_lfo_ms as number);
+      if ("seed_lfo_hz" in params) setSeedLfoHz(params.seed_lfo_hz as number);
+      sendParameterUpdate(params);
+    },
+    [sendParameterUpdate],
+  );
+
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
     isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
@@ -577,6 +642,17 @@ export function StreamPage() {
       setQuantizeMode("beat");
     }
   }, [tempoState.enabled, quantizeMode]);
+
+  // Auto-add Link Sync node when Link is engaged
+  useEffect(() => {
+    if (tempoState.enabled) {
+      const postIds = settings.postprocessorIds ?? [];
+      if (!postIds.includes("link-sync")) {
+        // Insert before first postprocessor (or at start if empty)
+        updateSettings({ postprocessorIds: ["link-sync", ...postIds] });
+      }
+    }
+  }, [tempoState.enabled]);
 
   // Send beat-quantized preprocessor params to backend when they change
   useEffect(() => {
@@ -671,10 +747,6 @@ export function StreamPage() {
 
   // Handler for input mode changes (text vs video)
   const handleInputModeChange = (newMode: InputMode) => {
-    // Stop stream if currently streaming
-    if (isStreaming) {
-      stopStream();
-    }
 
     // Get mode-specific defaults from backend schema
     const modeDefaults = getDefaults(settings.pipelineId, newMode);
@@ -1083,6 +1155,14 @@ export function StreamPage() {
       }
     }
     updateSettings({ [k.ids]: ids, [k.overrides]: kept });
+
+    // Hot-swap: send full pipeline chain to backend for live graph rebuild
+    if (isStreaming) {
+      const preIds = kind === "preprocessor" ? ids : (settings.preprocessorIds ?? []);
+      const postIds = kind === "postprocessor" ? ids : (settings.postprocessorIds ?? []);
+      const fullChain = [...preIds, settings.pipelineId, ...postIds];
+      sendParameterUpdate({ pipeline_ids: fullChain });
+    }
   };
 
   const makePipelineOverrideHandler =
@@ -2529,8 +2609,16 @@ export function StreamPage() {
           onClose={() => setSequencerOpen(false)}
           frameOffsets={frameOffsets}
           onFrameOffsetsChange={setFrameOffsets}
-          barProgress={barProgressRef.current}
+          tempoAnchor={tempoAnchorRef}
           beatSyncActive={tempoState.enabled}
+          tracks={sequencerTracks}
+          currentStep={currentStep}
+          sequencerValues={sequencerValues}
+          onStepChange={setStepValue}
+          onTrackEnabled={setTrackEnabled}
+          activeParams={activeParams}
+          onAddDynamicTrack={addDynamicTrack}
+          onRemoveDynamicTrack={removeDynamicTrack}
         />
 
         {/* Log Panel */}

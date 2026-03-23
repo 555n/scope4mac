@@ -56,12 +56,12 @@ export function FloatingWindow({
     origY: number;
   } | null>(null);
 
-  // Initialize position on first open
+  // Initialize position on first open — constrain below header
   useEffect(() => {
     if (open && position.x === -1) {
       setPosition({
         x: defaultX ?? Math.max(40, window.innerWidth / 2 - 200),
-        y: defaultY ?? 80,
+        y: Math.max(64, defaultY ?? 80),
       });
     }
   }, [open, position.x, defaultX, defaultY]);
@@ -96,10 +96,17 @@ export function FloatingWindow({
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
-        // Constrain top to app header (APP_HEADER_HEIGHT = 28px), no other constraints
+        const newX = dragRef.current.origX + ev.clientX - dragRef.current.startX;
+        const newY = dragRef.current.origY + ev.clientY - dragRef.current.startY;
+        // Constrain: top to below menu bar + status strip (64px),
+        // bottom to keep title bar on screen, left/right keep 60px visible
+        const minY = 64;
+        const maxY = window.innerHeight - 40;
+        const maxX = window.innerWidth - 60;
+        const winW = typeof width === "number" ? width : 300;
         setPosition({
-          x: dragRef.current.origX + ev.clientX - dragRef.current.startX,
-          y: Math.max(28, dragRef.current.origY + ev.clientY - dragRef.current.startY),
+          x: Math.max(-(winW - 60), Math.min(maxX, newX)),
+          y: Math.max(minY, Math.min(maxY, newY)),
         });
       };
 

@@ -272,6 +272,12 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether Syphon is available for output (macOS only)",
     )
+    cpu_percent: float | None = Field(
+        default=None, description="CPU utilization percentage"
+    )
+    gpu_percent: float | None = Field(
+        default=None, description="GPU utilization percentage"
+    )
 
 
 class PipelineStatusEnum(str, Enum):
