@@ -56,8 +56,11 @@ class LinkSyncPipeline(Pipeline):
         beat_phase = kwargs.get("beat_phase", 0.0)
         is_playing = kwargs.get("is_playing", False)
 
-        if not is_playing or beat_count < 0:
-            # Link not active — passthrough, drain buffer
+        # Gate when Link clock is running (bpm > 0 and beats advancing).
+        # link.playing is only True when Ableton transport is playing,
+        # but the clock runs regardless — use beat_count > 0 instead.
+        bpm = kwargs.get("bpm", 0)
+        if beat_count < 0 or bpm <= 0:
             self._released = video
             self._primed = False
             return {"video": video}
