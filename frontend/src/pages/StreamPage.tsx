@@ -654,6 +654,16 @@ export function StreamPage() {
     }
   }, [tempoState.enabled]);
 
+  // Send gate pattern to backend on stream start
+  useEffect(() => {
+    if (isStreaming) {
+      const timer = setTimeout(() => {
+        sendParameterUpdate({ frame_offsets: frameOffsets });
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming]);
+
   // Send beat-quantized preprocessor params to backend when they change
   useEffect(() => {
     if (!isStreaming) return;
@@ -2613,9 +2623,7 @@ export function StreamPage() {
           frameOffsets={frameOffsets}
           onFrameOffsetsChange={(offsets: number[]) => {
             setFrameOffsets(offsets);
-            if (isStreaming) {
-              sendParameterUpdate({ frame_offsets: offsets });
-            }
+            sendParameterUpdate({ frame_offsets: offsets });
           }}
           tempoAnchor={tempoAnchorRef}
           beatSyncActive={tempoState.enabled}

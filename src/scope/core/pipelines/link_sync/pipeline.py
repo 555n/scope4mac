@@ -80,17 +80,13 @@ class LinkSyncPipeline(Pipeline):
         # 16 gates per bar = 4 per beat (sixteenth notes)
         gate_idx = beat_count * 4 + int(beat_phase * 4)
 
-        # Gate pattern from frame_offsets — reinterpreted as 16-step open/close
-        # If frame_offsets provided as 16 values: >0 = open, 0 = closed
-        # If provided as 4 values (legacy): all gates open
+        # Gate pattern from frame_offsets: 16-element array, >0 = open, 0 = closed
         frame_offsets = kwargs.get("frame_offsets")
-        gate_open = True
+        gate_open = True  # default: all open if no pattern
 
-        if isinstance(frame_offsets, (list, tuple)):
-            if len(frame_offsets) == 16:
-                step = gate_idx % 16
-                gate_open = float(frame_offsets[step]) > 0
-            # 4-value legacy format: all gates open (backward compatible)
+        if isinstance(frame_offsets, (list, tuple)) and len(frame_offsets) >= 16:
+            step = gate_idx % 16
+            gate_open = float(frame_offsets[step]) > 0
 
         # New gate boundary
         if gate_idx != self._last_gate_idx:
