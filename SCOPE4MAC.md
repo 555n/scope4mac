@@ -24,6 +24,15 @@ Scope4Mac turns Daydream Scope into a beat-locked visual instrument. Diffusion p
 - Backend-authoritative step advancement from Link's linear timeline model
 - 60fps playhead via client-side BPM extrapolation (requestAnimationFrame, zero React re-renders)
 
+### Beat-Gated Frame Release
+- Frames from the diffusion pipeline buffer into a ring buffer
+- On each sixteenth-note boundary, the Link Sync node releases the next buffered frame if the gate is open
+- 16-step binary gate pattern — click to toggle each gate open/closed
+- Closed gate = hold previous frame (visual pause on that subdivision)
+- Opens creative rhythmic control: syncopated frame patterns, half-time feels, stutters
+- At 6 FPS / 107 BPM: buffer fills in ~0.7s, then gates fire on the grid
+- RIFE placed after the gate interpolates between beat-locked frames for smooth output
+
 ### Pipeline Hot-Swap
 - Add, remove, and reorder pre/postprocessor nodes during live streaming
 - Backend rebuilds the pipeline graph without dropping the WebRTC connection
