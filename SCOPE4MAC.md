@@ -1,5 +1,7 @@
 # Scope4Mac
 
+Make 6 FPS feel intentional. Real-time AI video tools for slow GPUs (and no GPUs at all).
+
 macOS port of Daydream Scope with Ableton Link integration, beat-synced parameter sequencing, and a live-performance-oriented processing pipeline.
 
 ## What It Does
