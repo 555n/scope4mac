@@ -38,10 +38,10 @@ Rebuilt the prompt timeline with DAW-style editing tools:
 - **Select tool** — click to select, drag to move clips in time
 - **Live prompt tracking** — the active prompt block extends its right edge to track the current playback position in real time
 - **Double-click to edit** — inline text editing on prompt clips
-- Clips are draggable, splittable, and deletable during both playback and idle
+- Clips are draggable, splittable, and deletable
 - Aqua-styled toolbar for tool selection
-
-Note: the timeline editor has a known regression in the current build. The underlying prompt submission and transition system (weight blending, temporal interpolation) works during streaming.
+- Scissors and hand tools work during playback and idle
+- Select/cursor tool works when stopped; prompts update live via Enter during streaming
 
 ### Processing Nodes (6 published)
 - **RIFE-Buffered** — frame interpolation via RIFE HDv3, auto (target FPS) and manual (2x-16x) modes
