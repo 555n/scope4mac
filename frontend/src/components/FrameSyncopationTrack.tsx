@@ -1,27 +1,20 @@
 /**
- * FrameSyncopationTrack — 4-beat frame displacement control.
+ * FrameGateTrack — 16-step binary gate pattern.
  *
- * Each beat column has a draggable region. Solid yellow fill shows
- * displacement amount with a thick yellow line at the target edge.
- * Continuous (no snapping).
- *
- * Playhead is driven at 60fps by useAnimatedPlayhead (rAF + BPM
- * extrapolation from Link's linear timeline model). No CSS transitions,
- * no React re-renders for animation.
+ * Each step is a toggle: open (releases a buffered frame on beat)
+ * or closed (holds previous frame). Click to toggle. All-on by default.
+ * Playhead driven at 60fps by useAnimatedPlayhead.
  */
 
-import { useCallback, useRef, type RefObject } from "react";
+import { type RefObject } from "react";
 import { ABLETON_COLORS, ABLETON_FONTS } from "../lib/AbletonStyles";
 import { useAnimatedPlayhead, type TempoAnchor } from "../hooks/useAnimatedPlayhead";
 
-const TOOLTIP_TEXT =
-  "Frame Syncopation \u2014 Drag to displace generated frames from beat onset.";
-
 interface FrameSyncopationTrackProps {
-  offsets: [number, number, number, number];
+  offsets: number[];
   tempoAnchor: RefObject<TempoAnchor>;
   active: boolean;
-  onChange: (offsets: [number, number, number, number]) => void;
+  onChange: (offsets: number[]) => void;
 }
 
 export function FrameSyncopationTrack({
@@ -30,44 +23,22 @@ export function FrameSyncopationTrack({
   active,
   onChange,
 }: FrameSyncopationTrackProps) {
-  const trackRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const offsetsRef = useRef(offsets);
-  offsetsRef.current = offsets;
+  // Ensure 16 steps
+  const gates = offsets.length === 16
+    ? offsets
+    : Array.from({ length: 16 }, (_, i) => offsets[i] ?? 1);
 
   const playheadRef = useAnimatedPlayhead(tempoAnchor, active);
 
-  const startDrag = useCallback(
-    (beatIdx: number, e: React.MouseEvent) => {
-      e.preventDefault();
-      const track = trackRefs.current[beatIdx];
-      if (!track) return;
-      const rect = track.getBoundingClientRect();
-
-      const updateOffset = (clientX: number) => {
-        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        // Map full width to 0.0-0.75, continuous (no snapping)
-        const value = Math.round(ratio * 0.75 * 1000) / 1000; // 3 decimal precision, no grid snap
-        const clamped = Math.max(0, Math.min(0.75, value));
-        const next = [...offsetsRef.current] as [number, number, number, number];
-        next[beatIdx] = clamped;
-        onChange(next);
-      };
-
-      const onMove = (ev: MouseEvent) => updateOffset(ev.clientX);
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-      updateOffset(e.clientX);
-    },
-    [onChange],
-  );
+  const toggle = (idx: number) => {
+    const next = [...gates];
+    next[idx] = next[idx] > 0 ? 0 : 1;
+    onChange(next);
+  };
 
   return (
-    <div style={{ display: "flex", gap: 0, height: 56 }}>
-      {/* Left margin — aligned with StepSequencerTrack */}
+    <div style={{ display: "flex", gap: 0, height: 40 }}>
+      {/* Label */}
       <div
         style={{
           width: 60,
@@ -78,7 +49,6 @@ export function FrameSyncopationTrack({
         }}
       >
         <span
-          title={TOOLTIP_TEXT}
           style={{
             fontFamily: ABLETON_FONTS.ui,
             fontSize: 9,
@@ -86,15 +56,14 @@ export function FrameSyncopationTrack({
             color: active ? ABLETON_COLORS.textSecondary : ABLETON_COLORS.textMuted,
             textTransform: "uppercase",
             letterSpacing: "0.03em",
-            cursor: "default",
           }}
         >
-          Frame
+          Gate
         </span>
       </div>
 
+      {/* 16 step toggles */}
       <div
-        title={TOOLTIP_TEXT}
         style={{
           flex: 1,
           display: "flex",
@@ -102,12 +71,10 @@ export function FrameSyncopationTrack({
           background: ABLETON_COLORS.retroDisplayBg,
           border: `1px solid ${ABLETON_COLORS.border}`,
           borderRadius: 2,
-          height: 56,
           overflow: "hidden",
-          cursor: "default",
         }}
       >
-        {/* Playhead — driven by rAF at 60fps, no CSS transition needed */}
+        {/* Playhead */}
         {active && (
           <div
             ref={playheadRef}
@@ -125,105 +92,62 @@ export function FrameSyncopationTrack({
           />
         )}
 
-        {offsets.map((offset, beatIdx) => {
-          const fillPct = offset <= 0 ? 0 : (offset / 0.75) * 100;
+        {gates.map((val, idx) => {
+          const isOpen = val > 0;
+          const isBeat = idx > 0 && idx % 4 === 0;
 
           return (
             <div
-              key={beatIdx}
-              ref={(el) => { trackRefs.current[beatIdx] = el; }}
-              onMouseDown={(e) => startDrag(beatIdx, e)}
+              key={idx}
+              onClick={() => toggle(idx)}
               style={{
                 flex: 1,
                 position: "relative",
-                borderRight: beatIdx < 3 ? `1px solid ${ABLETON_COLORS.lcdLine}` : "none",
-                cursor: "ew-resize",
+                cursor: "pointer",
+                borderLeft: isBeat
+                  ? `2px solid ${ABLETON_COLORS.lcdLine}`
+                  : idx > 0
+                    ? `1px solid rgba(255,255,255,0.04)`
+                    : "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
             >
-              {/* 16th grid lines */}
-              {[1, 2, 3].map((s) => (
-                <div
-                  key={s}
-                  style={{
-                    position: "absolute",
-                    left: `${(s / 4) * 100}%`,
-                    top: 0,
-                    bottom: 0,
-                    width: 1,
-                    background: "rgba(255,255,255,0.05)",
-                    pointerEvents: "none",
-                  }}
-                />
-              ))}
-
-              {/* Beat number */}
+              {/* Gate block — filled when open */}
               <div
                 style={{
-                  position: "absolute",
-                  top: 2,
-                  left: 4,
-                  fontFamily: ABLETON_FONTS.mono,
-                  fontSize: 9,
-                  color: ABLETON_COLORS.textMuted,
-                  pointerEvents: "none",
-                  userSelect: "none",
+                  width: "70%",
+                  height: "60%",
+                  borderRadius: 2,
+                  background: isOpen
+                    ? (active ? ABLETON_COLORS.accent : "#666")
+                    : "transparent",
+                  border: `1px solid ${isOpen
+                    ? (active ? ABLETON_COLORS.accent : "#666")
+                    : "rgba(255,255,255,0.1)"}`,
+                  transition: "background 0.05s",
                 }}
-              >
-                {beatIdx + 1}
-              </div>
+              />
 
-              {/* Solid yellow fill — 80% opacity */}
-              {fillPct > 0 && (
+              {/* Beat number every 4 steps */}
+              {idx % 4 === 0 && (
                 <div
                   style={{
                     position: "absolute",
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: `${fillPct}%`,
-                    background: active
-                      ? "rgba(247, 167, 56, 0.2)"
-                      : "rgba(127, 127, 127, 0.15)",
-                    zIndex: 2,
+                    top: 1,
+                    left: 2,
+                    fontFamily: ABLETON_FONTS.mono,
+                    fontSize: 7,
+                    color: ABLETON_COLORS.textMuted,
                     pointerEvents: "none",
+                    userSelect: "none",
+                    opacity: 0.6,
                   }}
-                />
+                >
+                  {idx / 4 + 1}
+                </div>
               )}
-
-              {/* Thick bright yellow target line — always visible */}
-              {(
-                <div
-                  style={{
-                    position: "absolute",
-                    left: fillPct > 0 ? `${fillPct}%` : "0",
-                    top: 0,
-                    bottom: 0,
-                    width: 3,
-                    marginLeft: fillPct > 0 ? -1 : 0,
-                    background: active ? "#F7A738" : "#888",
-                    zIndex: 3,
-                    pointerEvents: "none",
-                    boxShadow: active ? "0 0 6px rgba(247, 167, 56, 0.5)" : "none",
-                  }}
-                />
-              )}
-
-              {/* Offset value */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 2,
-                  right: 4,
-                  fontFamily: ABLETON_FONTS.mono,
-                  fontSize: 8,
-                  color: active ? ABLETON_COLORS.accent : ABLETON_COLORS.textMuted,
-                  pointerEvents: "none",
-                  userSelect: "none",
-                  opacity: 0.8,
-                }}
-              >
-                {offset <= 0 ? "0" : `+${(offset * 4).toFixed(1)}`}
-              </div>
             </div>
           );
         })}

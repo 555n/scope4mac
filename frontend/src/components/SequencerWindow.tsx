@@ -21,8 +21,8 @@ import type { OscParam } from "../hooks/useOscPaths";
 interface SequencerWindowProps {
   open: boolean;
   onClose: () => void;
-  frameOffsets: [number, number, number, number];
-  onFrameOffsetsChange: (offsets: [number, number, number, number]) => void;
+  frameOffsets: number[];
+  onFrameOffsetsChange: (offsets: number[]) => void;
   tempoAnchor: RefObject<TempoAnchor>;
   beatSyncActive: boolean;
   // Step sequencer

@@ -153,7 +153,7 @@ export function StreamPage() {
   const [linkDrawerOpen, setLinkDrawerOpen] = useState(false);
   const [sequencerOpen, setSequencerOpen] = useState(false);
   const [quantizeMode, setQuantizeMode] = useState("none");
-  const [frameOffsets, setFrameOffsets] = useState<[number, number, number, number]>([0, 0, 0, 0]);
+  const [frameOffsets, setFrameOffsets] = useState<number[]>([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]);
   // Tempo anchor for rAF-driven playhead (updated at 15Hz, consumed at 60fps)
   const tempoAnchorRef = useRef<TempoAnchor>({
     barPosition: 0, bpm: 120, beatsPerBar: 4,
@@ -2611,7 +2611,7 @@ export function StreamPage() {
           open={sequencerOpen}
           onClose={() => setSequencerOpen(false)}
           frameOffsets={frameOffsets}
-          onFrameOffsetsChange={(offsets: [number, number, number, number]) => {
+          onFrameOffsetsChange={(offsets: number[]) => {
             setFrameOffsets(offsets);
             if (isStreaming) {
               sendParameterUpdate({ frame_offsets: offsets });
