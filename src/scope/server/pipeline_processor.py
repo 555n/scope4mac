@@ -476,7 +476,7 @@ class PipelineProcessor:
                 # Subdivision cleared — reset boundary tracker to avoid
                 # stale boundary firing on re-enable
                 self._last_beat_boundary = -1
-            elif beat_state is not None and beat_state.is_playing:
+            elif beat_state is not None and beat_state.bpm > 0:
                 from scope.server.tempo_sync import get_beat_boundary
                 import math
 
@@ -534,7 +534,7 @@ class PipelineProcessor:
                     call_params["strength"] = base_strength + envelope_depth * envelope
 
             # 16-step sequencer: compute current step and apply overrides
-            if beat_state is not None and beat_state.is_playing:
+            if beat_state is not None and beat_state.bpm > 0:
                 bpb = self.tempo_sync.beats_per_bar if self.tempo_sync else 4
                 if bpb > 0:
                     normalized = beat_state.bar_position / bpb
