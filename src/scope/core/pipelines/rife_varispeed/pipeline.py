@@ -83,7 +83,7 @@ class RIFEVarispeedPipeline(Pipeline):
             self._prev = frame.clone()
             out = frame.unsqueeze(0)  # [H,W,C] → [1,H,W,C]
             self._hint = input_fps
-            return {"video": out.float() / 255}
+            return {"video": out}
 
         # Calculate multiplier from measured input rate and target
         mult = self._calc_mult(target_fps, input_fps)
@@ -103,8 +103,9 @@ class RIFEVarispeedPipeline(Pipeline):
                 mult, input_fps, self._hint, out.shape[0], target_fps,
             )
 
-        # Return [T,H,W,C] float [0,1]
-        return {"video": out.float() / 255}
+        # Return [T,H,W,C] uint8 — skip float conversion since
+        # pipeline_processor expects uint8 and would convert back anyway
+        return {"video": out}
 
     def _calc_mult(self, target: int, input_fps: float) -> int:
         """Calculate power-of-2 multiplier to reach target FPS from measured input rate."""

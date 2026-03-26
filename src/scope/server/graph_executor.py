@@ -179,13 +179,13 @@ def build_graph(
     elif sink_node_id:
         logger.info("Graph sink for playback: node_id=%s", sink_node_id)
 
-    # 4b) Resize sink's default output queues (initially 8) to match
-    # inter-pipeline queue size so output batches don't get dropped.
+    # 4b) Ensure sink output queues are large enough for frame-multiplying
+    # postprocessors (RIFE produces 4-8x frames per input).
     if sink_processor is not None:
         for port, qlist in list(sink_processor.output_queues.items()):
-            if qlist and qlist[0].maxsize < DEFAULT_INPUT_QUEUE_MAXSIZE:
+            if qlist and qlist[0].maxsize < DEFAULT_OUTPUT_QUEUE_MAXSIZE:
                 sink_processor.output_queues[port] = [
-                    queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                    queue.Queue(maxsize=DEFAULT_OUTPUT_QUEUE_MAXSIZE)
                 ]
 
     # Collect output/sink node IDs for preview mapping

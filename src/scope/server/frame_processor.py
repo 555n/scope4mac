@@ -629,6 +629,9 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Work on a copy to avoid mutating the caller's dict
+        parameters = dict(parameters)
+
         # Handle generic output sinks config
         if "output_sinks" in parameters:
             sinks_config = parameters.pop("output_sinks")
@@ -657,8 +660,13 @@ class FrameProcessor:
             for processor in self.pipeline_processors:
                 processor.update_parameters(parameters)
 
-        # Update local parameters (excluding frame-processor-only keys)
-        self.parameters = {**self.parameters, **parameters}
+        # Update local parameters — exclude transient state that pipeline
+        # processors consume via pop() and that shouldn't persist across hot-swaps
+        persistent = {
+            k: v for k, v in parameters.items()
+            if k not in ("paused", "recording")
+        }
+        self.parameters = {**self.parameters, **persistent}
 
         return True
 
@@ -1120,7 +1128,7 @@ class FrameProcessor:
         # keys that shouldn't be sent to pipeline processors.
         broadcast_params = {
             k: v for k, v in self.parameters.items()
-            if k not in ("pipeline_ids", "output_sinks", "input_source", "node_id")
+            if k not in ("pipeline_ids", "output_sinks", "input_source", "node_id", "paused", "recording")
         }
         for proc in self.pipeline_processors:
             proc.update_parameters(dict(broadcast_params))

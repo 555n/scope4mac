@@ -409,7 +409,10 @@ class PipelineProcessor:
         reset_cache = self.parameters.pop("reset_cache", None)
         lora_scales = self.parameters.pop("lora_scales", None)
 
-        # Handle reset_cache: clear this processor's output queues
+        # Handle explicit reset_cache from user (parameter update):
+        # flush output queues + reset pipeline cache state.
+        # Beat-triggered resets (set later in beat modulation) only set
+        # _pending_cache_init without flushing — avoids starving downstream.
         if reset_cache:
             logger.info(f"Clearing cache for pipeline processor: {self.pipeline_id}")
             for queues in self.output_queues.values():
@@ -474,12 +477,18 @@ class PipelineProcessor:
             # Works with non-autoregressive pipelines (turbo4mac/SD-Turbo)
             # that don't have KV cache. For Wan2.1 pipelines, also triggers
             # cache reset for maximum discontinuity.
+            # Beat modulation: only apply to pipelines that support prompts
+            # (diffusion pipelines). Preprocessors and postprocessors skip this
+            # to avoid flushing their output queues on every beat boundary.
+            config_cls = self.pipeline.get_config_class() if hasattr(self.pipeline, "get_config_class") else None
+            pipeline_supports_beat_mod = config_cls is not None and getattr(config_cls, "supports_prompts", False)
+
             beat_subdivision = call_params.get("subdivision")
             if not beat_subdivision:
                 # Subdivision cleared — reset boundary tracker to avoid
                 # stale boundary firing on re-enable
                 self._last_beat_boundary = -1
-            elif beat_state is not None and beat_state.bpm > 0:
+            elif pipeline_supports_beat_mod and beat_state is not None and beat_state.bpm > 0:
                 from scope.server.tempo_sync import get_beat_boundary
                 import math
 
@@ -510,8 +519,9 @@ class PipelineProcessor:
                         if current_seed > 0:
                             call_params["seed"] = (current_seed + 997) % 1000000
 
-                    # Cache reset for autoregressive pipelines (Wan2.1)
-                    reset_cache = True
+                    # Signal cache init for autoregressive pipelines (Wan2.1).
+                    # Do NOT set reset_cache=True here — that flushes output queues
+                    # and starves downstream pipelines. Only flag the init.
                     self._pending_cache_init = True
 
                 self._last_beat_boundary = boundary
