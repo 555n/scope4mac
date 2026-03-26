@@ -235,6 +235,10 @@ export class ScopeElectronAppService {
 
     // Security: Open external links in default browser
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      // Allow about:blank for internal popout windows (FloatingWindow)
+      if (url === 'about:blank') {
+        return { action: 'allow' };
+      }
       if (!this.isAllowedUrl(url)) {
         // Open external URLs in the default browser
         shell.openExternal(url).catch((err) => {

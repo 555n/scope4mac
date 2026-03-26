@@ -275,6 +275,9 @@ export function LinkDrawer({
       defaultX={-1}
       defaultY={60}
       bodyBackground={ABLETON_COLORS.surfaceBg}
+      allowPopout
+      popoutWidth={280}
+      popoutHeight={460}
       bodyStyle={{ padding: 12, color: ABLETON_COLORS.textPrimary }}
     >
       {noSources ? (

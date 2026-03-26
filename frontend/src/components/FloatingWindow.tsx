@@ -6,9 +6,14 @@
  * - Window layering: clicking brings to front without disturbing others
  * - Maintains position across show/hide
  * - Utility windows float above document windows
+ *
+ * Popout: creates a separate OS window via window.open() with its own
+ * React root. Callbacks work cross-window via closures. Children are
+ * re-rendered in the child root on each parent update.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { AQUA_COLORS, AQUA_GRADIENTS } from "../lib/AquaStyles";
 
 // Global z-index counter for window stacking
@@ -31,6 +36,11 @@ interface FloatingWindowProps {
   bodyBackground?: string;
   /** Extra styles on body div */
   bodyStyle?: React.CSSProperties;
+  /** Enable popout button in title bar */
+  allowPopout?: boolean;
+  /** Popout window dimensions */
+  popoutWidth?: number;
+  popoutHeight?: number;
 }
 
 export function FloatingWindow({
@@ -45,10 +55,16 @@ export function FloatingWindow({
   minWidth,
   bodyBackground,
   bodyStyle,
+  allowPopout = false,
+  popoutWidth = 400,
+  popoutHeight = 500,
 }: FloatingWindowProps) {
   const windowRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: defaultX ?? -1, y: defaultY ?? -1 });
   const [zIndex, setZIndex] = useState(() => nextZ());
+  const [isPoppedOut, setIsPoppedOut] = useState(false);
+  const childWindowRef = useRef<Window | null>(null);
+  const childRootRef = useRef<Root | null>(null);
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -66,25 +82,69 @@ export function FloatingWindow({
     }
   }, [open, position.x, defaultX, defaultY]);
 
-  // Close on Escape
+  // Close on Escape (only when inline, not popped out)
   useEffect(() => {
-    if (!open) return;
+    if (!open || isPoppedOut) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, onClose, isPoppedOut]);
 
-  // Bring to front on click
+  // Re-render children in the child window's React root on every update
+  useEffect(() => {
+    if (isPoppedOut && childRootRef.current) {
+      childRootRef.current.render(
+        <div style={{ background: bodyBackground ?? "#1a1a1a", minHeight: "100vh", ...bodyStyle }}>
+          {children}
+        </div>,
+      );
+    }
+  });
+
+  // Clean up child window on close
+  useEffect(() => {
+    if (!open) {
+      if (childRootRef.current) {
+        childRootRef.current.unmount();
+        childRootRef.current = null;
+      }
+      if (childWindowRef.current && !childWindowRef.current.closed) {
+        childWindowRef.current.close();
+      }
+      childWindowRef.current = null;
+      if (isPoppedOut) setIsPoppedOut(false);
+    }
+  }, [open, isPoppedOut]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (childRootRef.current) {
+        childRootRef.current.unmount();
+        childRootRef.current = null;
+      }
+      if (childWindowRef.current && !childWindowRef.current.closed) {
+        childWindowRef.current.close();
+      }
+    };
+  }, []);
+
+  // Bring to front — skip if already on top to avoid re-renders during drag
+  const zIndexRef = useRef(zIndex);
+  zIndexRef.current = zIndex;
   const bringToFront = useCallback(() => {
-    setZIndex(nextZ());
+    if (zIndexRef.current < globalZCounter) {
+      setZIndex(nextZ());
+    }
   }, []);
 
   // Title bar drag
   const onTitleBarMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if ((e.target as HTMLElement).closest("[data-close-button]")) return;
+      if ((e.target as HTMLElement).closest("[data-popout-button]")) return;
       e.preventDefault();
       bringToFront();
       dragRef.current = {
@@ -98,8 +158,6 @@ export function FloatingWindow({
         if (!dragRef.current) return;
         const newX = dragRef.current.origX + ev.clientX - dragRef.current.startX;
         const newY = dragRef.current.origY + ev.clientY - dragRef.current.startY;
-        // Constrain: top to below menu bar + status strip (64px),
-        // bottom to keep title bar on screen, left/right keep 60px visible
         const minY = 64;
         const maxY = window.innerHeight - 40;
         const maxX = window.innerWidth - 60;
@@ -119,11 +177,76 @@ export function FloatingWindow({
       window.addEventListener("mousemove", onMouseMove);
       window.addEventListener("mouseup", onMouseUp);
     },
-    [position, bringToFront],
+    [position, bringToFront, width],
   );
+
+  const handlePopOut = useCallback(() => {
+    if (childWindowRef.current && !childWindowRef.current.closed) {
+      childWindowRef.current.focus();
+      return;
+    }
+
+    const left = window.screenX + (position.x > 0 ? position.x : 80);
+    const top = window.screenY + (position.y > 0 ? position.y : 80);
+    const features = `width=${popoutWidth},height=${popoutHeight},left=${left},top=${top},menubar=no,toolbar=no,status=no`;
+
+    const child = window.open("about:blank", "", features);
+    if (!child) return;
+
+    childWindowRef.current = child;
+    child.document.title = title;
+
+    // Copy parent stylesheets for consistent rendering
+    const parentStyles = document.querySelectorAll('style, link[rel="stylesheet"]');
+    parentStyles.forEach((node) => {
+      child.document.head.appendChild(node.cloneNode(true));
+    });
+
+    // Match app theme
+    child.document.body.style.cssText =
+      `margin:0; padding:0; background:${bodyBackground ?? "hsl(0,0%,8%)"}; color:hsl(0,0%,90%); overflow:auto; font-family:-apple-system,BlinkMacSystemFont,sans-serif;`;
+
+    // Create a separate React root in the child window.
+    // This gives the child its own event delegation — clicks, inputs,
+    // and all React synthetic events work. Callbacks from the parent
+    // work cross-window because they're JavaScript closures.
+    const container = child.document.createElement("div");
+    container.id = "popout-root";
+    container.style.cssText = "padding:0; min-height:100vh;";
+    child.document.body.appendChild(container);
+
+    const childRoot = createRoot(container);
+    childRootRef.current = childRoot;
+
+    // Initial render
+    childRoot.render(
+      <div style={{ background: bodyBackground ?? "#1a1a1a", minHeight: "100vh", ...bodyStyle }}>
+        {children}
+      </div>,
+    );
+
+    setIsPoppedOut(true);
+
+    // When child closes, close the panel
+    child.addEventListener("beforeunload", () => {
+      if (childRootRef.current) {
+        childRootRef.current.unmount();
+        childRootRef.current = null;
+      }
+      childWindowRef.current = null;
+      setIsPoppedOut(false);
+      onClose();
+    });
+  }, [title, popoutWidth, popoutHeight, position, bodyBackground, bodyStyle, onClose, children]);
 
   if (!open) return null;
 
+  // When popped out, render nothing in the parent — child root handles rendering
+  if (isPoppedOut) {
+    return null;
+  }
+
+  // Inline floating window
   return (
     <div
       ref={windowRef}
@@ -192,6 +315,28 @@ export function FloatingWindow({
           }}
         />
 
+        {/* Popout button (traffic light green) */}
+        {allowPopout && (
+          <div
+            data-popout-button
+            onClick={handlePopOut}
+            title="Pop out to separate window"
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: "50%",
+              background: AQUA_COLORS.aquaGreen ?? "#61c554",
+              border: "1px solid rgba(0,0,0,0.2)",
+              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.2)",
+              cursor: "pointer",
+              flexShrink: 0,
+              position: "relative",
+              zIndex: 10,
+              marginLeft: 4,
+            }}
+          />
+        )}
+
         {/* Title text */}
         <div style={{ flex: 1, textAlign: "center", position: "relative", zIndex: 10 }}>
           <span
@@ -206,8 +351,8 @@ export function FloatingWindow({
           </span>
         </div>
 
-        {/* Spacer to balance close button */}
-        <div style={{ width: 12, flexShrink: 0 }} />
+        {/* Spacer to balance traffic lights */}
+        <div style={{ width: allowPopout ? 28 : 12, flexShrink: 0 }} />
       </div>
 
       {/* Body */}

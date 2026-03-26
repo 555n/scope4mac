@@ -910,6 +910,40 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
 };
 
 // ---------------------------------------------------------------------------
+// Node Recording (per-stage pipeline recording)
+// ---------------------------------------------------------------------------
+
+export const startNodeRecording = async (outputDir?: string): Promise<{ recording: boolean; num_recorders: number }> => {
+  const response = await fetch("/api/v1/node-recording/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ output_dir: outputDir }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to start node recording: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const stopNodeRecording = async (): Promise<{ files: string[] }> => {
+  const response = await fetch("/api/v1/node-recording/stop", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to stop node recording: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const getNodeRecordingStatus = async (): Promise<{ recording: boolean; num_recorders: number; recorded_files: string[] }> => {
+  const response = await fetch("/api/v1/node-recording/status");
+  if (!response.ok) return { recording: false, num_recorders: 0, recorded_files: [] };
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
 // Workflow
 // ---------------------------------------------------------------------------
 

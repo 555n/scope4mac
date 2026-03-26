@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
 
   // File system
   BROWSE_DIRECTORY: 'browse-directory',
+  OPEN_PATH: 'open-path',
 
   // Deep links
   DEEP_LINK_ACTION: 'deep-link-action',

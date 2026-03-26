@@ -89,6 +89,10 @@ class FrameProcessor:
         # Output sinks keyed by type
         self.output_sinks: dict[str, dict] = {}
 
+        # Per-node recording
+        self._node_recording_manager = None  # NodeRecordingManager | None
+        self._node_recording_auto_resume = False
+
         self.input_source: InputSource | None = None
         self.input_source_enabled = False
         self.input_source_type = ""
@@ -233,6 +237,10 @@ class FrameProcessor:
             return
 
         self.running = False
+
+        # Stop node recording before destroying processors
+        if self._node_recording_manager and self._node_recording_manager.is_recording:
+            self._node_recording_manager.stop()
 
         # Stop all pipeline processors
         for processor in self.pipeline_processors:
@@ -631,6 +639,11 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
+        # Preserve sequencer_pattern in local params before processors pop it.
+        # This ensures hot-swap re-broadcast includes the latest pattern.
+        if "sequencer_pattern" in parameters:
+            self.parameters["sequencer_pattern"] = parameters["sequencer_pattern"]
+
         # Route to specific node or broadcast to all pipeline processors
         node_id = parameters.pop("node_id", None)
         if node_id:
@@ -644,10 +657,44 @@ class FrameProcessor:
             for processor in self.pipeline_processors:
                 processor.update_parameters(parameters)
 
-        # Update local parameters
+        # Update local parameters (excluding frame-processor-only keys)
         self.parameters = {**self.parameters, **parameters}
 
         return True
+
+    # --- Per-node recording ---
+
+    def start_node_recording(self, output_dir: str) -> dict:
+        """Start per-node recording for all pipeline processors."""
+        from .node_recording_manager import NodeRecordingManager
+
+        if self._node_recording_manager and self._node_recording_manager.is_recording:
+            return {"error": "Already recording"}
+
+        if not self.pipeline_processors:
+            return {"error": "No active pipeline"}
+
+        self._node_recording_manager = NodeRecordingManager()
+        self._node_recording_manager.start(
+            processors=self.pipeline_processors,
+            output_dir=output_dir,
+            session_id=self.session_id,
+        )
+        self._node_recording_auto_resume = True
+        return self._node_recording_manager.get_status()
+
+    def stop_node_recording(self) -> list[str]:
+        """Stop per-node recording, return file paths."""
+        self._node_recording_auto_resume = False
+        if self._node_recording_manager and self._node_recording_manager.is_recording:
+            return self._node_recording_manager.stop()
+        return []
+
+    def get_node_recording_status(self) -> dict:
+        """Return current recording state."""
+        if self._node_recording_manager:
+            return self._node_recording_manager.get_status()
+        return {"recording": False, "num_recorders": 0, "recorded_files": []}
 
     def _update_output_sinks_from_config(self, config: dict):
         """Handle the generic output_sinks config dict.
@@ -1028,26 +1075,39 @@ class FrameProcessor:
             raise RuntimeError("Stream not running")
 
         # 0. Pre-load any pipelines that aren't loaded yet
-        for pid in new_pipeline_ids:
+        from .graph_schema import unique_node_ids
+        for node_id, pid in unique_node_ids(new_pipeline_ids):
             try:
-                self.pipeline_manager.get_pipeline_by_id(pid)
+                self.pipeline_manager.get_pipeline_by_id(node_id)
             except Exception:
-                logger.info("[HOT-SWAP] Loading pipeline: %s", pid)
-                self.pipeline_manager._load_pipeline_by_id_sync(pid)
+                logger.info("[HOT-SWAP] Loading pipeline: %s (node_id=%s)", pid, node_id)
+                self.pipeline_manager._load_pipeline_by_id_sync(pid, instance_key=node_id)
+
+        # 0.5. Stop node recording before destroying processors
+        was_recording = (
+            self._node_recording_manager is not None
+            and self._node_recording_manager.is_recording
+        )
+        if was_recording:
+            self._node_recording_manager.stop()
 
         # 1. Stop all current processors
         for proc in self.pipeline_processors:
             proc.stop()
 
-        # 2. Pause frame flow
+        # 2. Keep old source queues alive during rebuild — frames arriving
+        # via put() continue flowing into old queues (which are disconnected
+        # from stopped processors, so they just fill up harmlessly).
+        # This avoids the silent frame-drop window that causes freeze.
         old_source_queues = self._graph_source_queues
-        self._graph_source_queues = []
 
         # 3. Clear old processor references and rebuild graph
         self._processors_by_node_id = {}
         self.pipeline_ids = new_pipeline_ids
         try:
             self._setup_pipelines_sync()
+            # _setup_pipelines_sync atomically sets _graph_source_queues
+            # to the NEW graph's queues. put() now routes to new processors.
         except Exception as e:
             # Rollback — restore old queues (processors already stopped)
             self._graph_source_queues = old_source_queues
@@ -1055,9 +1115,27 @@ class FrameProcessor:
             logger.error("[HOT-SWAP] Failed: %s", e)
             raise
 
+        # Re-broadcast current parameters to new processors to ensure
+        # nothing was lost during the swap window. Filter out frame-processor-only
+        # keys that shouldn't be sent to pipeline processors.
+        broadcast_params = {
+            k: v for k, v in self.parameters.items()
+            if k not in ("pipeline_ids", "output_sinks", "input_source", "node_id")
+        }
+        for proc in self.pipeline_processors:
+            proc.update_parameters(dict(broadcast_params))
+
         elapsed = int((_time.time() - start) * 1000)
         added = [p for p in new_pipeline_ids if p not in old_ids]
         removed = [p for p in old_ids if p not in new_pipeline_ids]
+
+        # Resume node recording on new processors if it was active
+        if was_recording and self._node_recording_auto_resume and self._node_recording_manager:
+            self._node_recording_manager.start(
+                processors=self.pipeline_processors,
+                output_dir=self._node_recording_manager._output_dir,
+                session_id=self.session_id,
+            )
 
         logger.info(
             "[HOT-SWAP] %dms — added=%s removed=%s chain=%s",

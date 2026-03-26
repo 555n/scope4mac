@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import warnings
@@ -650,9 +651,11 @@ async def load_pipeline(
                 (p.node_id, p.pipeline_id, p.load_params) for p in request.pipelines
             ]
         elif request.pipeline_ids:
-            # Legacy format: use pipeline_id as node_id
+            # Legacy format: generate unique node_ids for duplicate pipeline_ids
+            from .graph_schema import unique_node_ids
             pipelines = [
-                (pid, pid, request.load_params) for pid in request.pipeline_ids
+                (node_id, pid, request.load_params)
+                for node_id, pid in unique_node_ids(request.pipeline_ids)
             ]
         else:
             raise HTTPException(
@@ -1036,6 +1039,50 @@ async def download_recording(
     except Exception as e:
         logger.error(f"Error downloading recording: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/node-recording/start")
+async def start_node_recording(
+    request: Request,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Start per-node pipeline stage recording."""
+    body = await request.json()
+    output_dir = body.get("output_dir", os.path.join(tempfile.gettempdir(), "scope_node_recordings"))
+
+    result = webrtc_manager.get_frame_processor()
+    if not result:
+        raise HTTPException(status_code=404, detail="No active session")
+    _sid, fp, _headless = result
+    status = fp.start_node_recording(output_dir)
+    if "error" in status:
+        raise HTTPException(status_code=400, detail=status["error"])
+    return status
+
+
+@app.post("/api/v1/node-recording/stop")
+async def stop_node_recording(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Stop per-node recording, return file paths."""
+    result = webrtc_manager.get_frame_processor()
+    if not result:
+        raise HTTPException(status_code=404, detail="No active session")
+    _sid, fp, _headless = result
+    paths = fp.stop_node_recording()
+    return {"files": paths}
+
+
+@app.get("/api/v1/node-recording/status")
+async def get_node_recording_status(
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Get node recording state."""
+    result = webrtc_manager.get_frame_processor()
+    if not result:
+        return {"recording": False, "num_recorders": 0, "recorded_files": []}
+    _sid, fp, _headless = result
+    return fp.get_node_recording_status()
 
 
 class ModelStatusResponse(BaseModel):

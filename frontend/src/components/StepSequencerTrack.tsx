@@ -176,7 +176,7 @@ export function StepSequencerTrack({
                     right: 0,
                     top: `${randomTop}%`,
                     height: `${randomHeight}%`,
-                    background: "repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(247,167,56,0.08) 2px, rgba(247,167,56,0.08) 4px)",
+                    background: "repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(100,180,255,0.18) 2px, rgba(100,180,255,0.18) 4px)",
                     pointerEvents: "none",
                     zIndex: 2,
                   }}

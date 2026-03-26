@@ -11,10 +11,8 @@ import logging
 import time
 
 import torch
-from einops import rearrange
 
 from ..interface import Pipeline, Requirements
-from ..process import normalize_frame_sizes, postprocess_chunk, preprocess_chunk
 from .schema import RIFEVarispeedConfig
 
 logger = logging.getLogger(__name__)
@@ -41,11 +39,10 @@ class RIFEVarispeedPipeline(Pipeline):
         logger.info("RIFE-Varispeed loaded")
 
         self._prev = None
-        self._last_t = 0.0
-        self._fps_ema = 0.0
-        self._alpha = 0.3
         self._n = 0
         self._hint = 0.0
+        # Input FPS measured externally by pipeline_processor (injected as kwarg)
+        self._fallback_fps = 6.0
 
     def prepare(self, **kwargs):
         return Requirements(input_size=1)
@@ -55,62 +52,65 @@ class RIFEVarispeedPipeline(Pipeline):
         if v is None:
             return None
 
-        self._tick()
-
-        # Handle input format: list of [1,H,W,C] uint8, or a raw tensor (THWC)
+        # Extract single frame: list of [1,H,W,C] uint8 → [H,W,C] uint8
         if isinstance(v, list):
             if len(v) == 0:
                 return None
-            v = normalize_frame_sizes(v)
-            v = preprocess_chunk(v, self.device, self.dtype)
-            # v is now BCTHW [-1,1] — convert to THWC [0,255] uint8
-            f = postprocess_chunk(rearrange(v, "B C T H W -> B T C H W"))
-            f = (f * 255).clamp(0, 255).to(torch.uint8)
-            if f.dim() == 4:
-                f = f[0]
+            frame = v[0]
+            if frame.dim() == 4:
+                frame = frame[0]  # [1,H,W,C] → [H,W,C]
         elif isinstance(v, torch.Tensor):
-            # Tensor from upstream pipeline — already THWC [0,1] float or [0,255] uint8
-            f = v.to(self.device)
-            if f.dim() == 5:
-                # [B,T,H,W,C] or similar — squeeze batch
-                f = f.squeeze(0)
-            if f.dtype != torch.uint8:
-                f = (f * 255).clamp(0, 255).to(torch.uint8)
-            # Ensure 3D [H,W,C] gets unsqueezed to [1,H,W,C]
-            if f.dim() == 3:
-                f = f.unsqueeze(0)
+            frame = v.to(self.device)
+            if frame.dim() == 4:
+                frame = frame[0]
         else:
             return None
 
+        frame = frame.to(self.device)
+        if frame.dtype != torch.uint8:
+            frame = (frame * 255).clamp(0, 255).to(torch.uint8)
+
+        self._n += 1
         target_fps = int(kwargs.get("target_fps", 24))
 
+        # Use input_fps from pipeline_processor (measured at queue level)
+        input_fps = float(kwargs.get("input_fps", self._fallback_fps))
+        if input_fps > 0:
+            self._fallback_fps = input_fps
+
+        # First frame — store and pass through
         if self._prev is None:
-            self._prev = f.clone()
-            self._hint = max(self._fps_ema, 1.0)
-            return {"video": (f.float() / 255).unsqueeze(0)}
+            self._prev = frame.clone()
+            out = frame.unsqueeze(0)  # [H,W,C] → [1,H,W,C]
+            self._hint = input_fps
+            return {"video": out.float() / 255}
 
         # Calculate multiplier from measured input rate and target
-        mult = self._calc_mult(target_fps)
+        mult = self._calc_mult(target_fps, input_fps)
 
         # Use RIFE's batched subdivision — efficient on MPS
-        pair = torch.stack([self._prev, f])
-        out = self.rife.interpolate(pair, multiplier=mult)[1:]  # Skip first (prev) frame
-        self._prev = f.clone()
-        self._hint = min(60.0, max(self._fps_ema, 1.0) * mult)
+        # interpolate expects [T,H,W,C] uint8, returns [T_out,H,W,C] uint8
+        pair = torch.stack([self._prev, frame])  # [2,H,W,C]
+        out = self.rife.interpolate(pair, multiplier=mult)
+        # out includes both endpoints: [2*mult+1, H, W, C] → skip first (prev)
+        out = out[1:]
+        self._prev = frame.clone()
+        self._hint = min(60.0, max(input_fps, 1.0) * mult)
 
         if self._n % 30 == 1:
             logger.info(
                 "[RIFE-VS] %dx in=%.1ffps→%.0f frames=%d target=%d",
-                mult, self._fps_ema, self._hint, out.shape[0], target_fps,
+                mult, input_fps, self._hint, out.shape[0], target_fps,
             )
 
+        # Return [T,H,W,C] float [0,1]
         return {"video": out.float() / 255}
 
-    def _calc_mult(self, target: int) -> int:
+    def _calc_mult(self, target: int, input_fps: float) -> int:
         """Calculate power-of-2 multiplier to reach target FPS from measured input rate."""
-        if target <= 0 or self._n < 3 or self._fps_ema <= 0:
+        if target <= 0 or self._n < 3 or input_fps <= 0:
             return 2
-        r = target / max(self._fps_ema, 1e-6)
+        r = target / max(input_fps, 1e-6)
         # Cap at 8x on MPS for performance
         if r < 1.15:
             return 1
@@ -125,16 +125,6 @@ class RIFEVarispeedPipeline(Pipeline):
 
     def reset(self):
         self._prev = None
-        self._last_t = 0.0
-        self._fps_ema = 0.0
         self._n = 0
-
-    def _tick(self):
-        now = time.perf_counter()
-        self._n += 1
-        if self._last_t > 0:
-            dt = now - self._last_t
-            if dt > 0:
-                i = 1.0 / dt
-                self._fps_ema = (self._alpha * i + (1 - self._alpha) * self._fps_ema) if self._fps_ema > 0 else i
-        self._last_t = now
+        self._fallback_fps = 6.0
+        self._hint = 0.0

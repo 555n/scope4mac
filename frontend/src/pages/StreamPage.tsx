@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Header } from "../components/Header";
+import { useNodeRecording } from "../hooks/useNodeRecording";
+import { useWindowRecording } from "../hooks/useWindowRecording";
 import { ChromeTribalOverlay } from "../components/ChromeTribalOverlay";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { OutputsPanel } from "../components/OutputsPanel";
+// OutputsPanel removed — output sinks now in Header → Output menu
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
@@ -605,6 +607,10 @@ export function StreamPage() {
     addDynamicTrack,
     removeDynamicTrack,
   } = useStepSequencer(sendParameterUpdate, isStreaming);
+
+  // Recording hooks
+  const nodeRecording = useNodeRecording();
+  const windowRecording = useWindowRecording();
 
   // Dynamic pipeline parameter discovery
   // Dynamic tracks from active pre/post processor schemas
@@ -2204,6 +2210,16 @@ export function StreamPage() {
           onSettingsTabOpened={() => setOpenSettingsTab(null)}
           linkEnabled={tempoState.enabled}
           onLinkToggle={() => setLinkDrawerOpen(prev => !prev)}
+          ndiOutputAvailable={ndiOutputAvailable}
+          syphonOutputAvailable={syphonOutputAvailable}
+          outputSinks={settings.outputSinks}
+          onOutputSinkToggle={handleOutputSinkChange}
+          isNodeRecording={nodeRecording.isRecording}
+          onNodeRecordingToggle={nodeRecording.toggle}
+          isWindowRecording={windowRecording.isRecording}
+          onWindowRecordingToggle={windowRecording.toggle}
+          onChooseRecordingDir={nodeRecording.chooseDir}
+          onOpenRecordings={nodeRecording.openDir}
           fps={webrtcStats.fps}
           bitrate={webrtcStats.bitrate}
           unifiedMemoryUsed={hardwareInfo?.mps_allocated_gb ?? undefined}
@@ -2328,17 +2344,7 @@ export function StreamPage() {
                 }
               }}
             />
-            {hasAvailableOutputs && (
-              <OutputsPanel
-                className="flex-shrink-0"
-                outputSinks={settings.outputSinks}
-                onOutputSinkChange={handleOutputSinkChange}
-                spoutAvailable={spoutAvailable}
-                ndiAvailable={ndiOutputAvailable}
-                syphonAvailable={syphonOutputAvailable}
-                isStreaming={isStreaming}
-              />
-            )}
+            {/* Output sinks moved to Header → Output menu */}
           </div>
 
           {/* Center Panel - Video (square) + Timeline */}

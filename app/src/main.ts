@@ -453,6 +453,13 @@ ipcMain.handle(IPC_CHANNELS.BROWSE_DIRECTORY, validateIPC(async (_event: any, ti
   return result.canceled ? null : result.filePaths[0];
 }, IPC_CHANNELS.BROWSE_DIRECTORY));
 
+ipcMain.handle(IPC_CHANNELS.OPEN_PATH, validateIPC(async (_event: any, filePath: string) => {
+  if (typeof filePath !== 'string') {
+    throw new Error('Path must be a string');
+  }
+  return shell.openPath(filePath);
+}, IPC_CHANNELS.OPEN_PATH));
+
 ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL, validateIPC(async (_event: any, url: string) => {
   // Validate URL
   if (typeof url !== 'string') {
@@ -775,6 +782,10 @@ function configureProcessSecurity(): void {
   app.on('web-contents-created', (_event, contents) => {
     // Set up window open handler for all windows to open external links in default browser
     contents.setWindowOpenHandler(({ url }) => {
+      // Allow about:blank for internal popout windows (FloatingWindow)
+      if (url === 'about:blank') {
+        return { action: 'allow' };
+      }
       try {
         const parsedUrl = new URL(url);
         // Check if it's an external URL (not localhost or the server)

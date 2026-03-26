@@ -38,8 +38,8 @@ function AquaGelHighlight({ show }: { show: boolean }) {
 }
 
 function MenuItem({
-  label, onClick, disabled, shortcut,
-}: { label: string; onClick?: () => void; disabled?: boolean; shortcut?: string }) {
+  label, onClick, disabled, shortcut, checked,
+}: { label: string; onClick?: () => void; disabled?: boolean; shortcut?: string; checked?: boolean }) {
   return (
     <button
       onClick={disabled ? undefined : onClick}
@@ -53,7 +53,7 @@ function MenuItem({
       onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = disabled ? "#999" : "#222"; }}
     >
       <span style={{ display: "flex", justifyContent: "space-between", gap: 20 }}>
-        <span>{label}</span>
+        <span>{checked !== undefined ? `${checked ? "✓ " : "   "}${label}` : label}</span>
         {shortcut && <span style={{ opacity: 0.5, fontSize: 11 }}>{shortcut}</span>}
       </span>
     </button>
@@ -140,6 +140,11 @@ function AquaBarGauge({ label, valueText, pct, barColor }: {
 
 // --- Header ---
 
+interface OutputSinkState {
+  enabled: boolean;
+  name: string;
+}
+
 interface HeaderProps {
   className?: string;
   onPipelinesRefresh?: () => Promise<unknown>;
@@ -148,6 +153,18 @@ interface HeaderProps {
   onSettingsTabOpened?: () => void;
   linkEnabled?: boolean;
   onLinkToggle?: () => void;
+  // Output sinks
+  ndiOutputAvailable?: boolean;
+  syphonOutputAvailable?: boolean;
+  outputSinks?: Record<string, OutputSinkState>;
+  onOutputSinkToggle?: (sinkType: string, config: OutputSinkState) => void;
+  // Recording
+  isNodeRecording?: boolean;
+  onNodeRecordingToggle?: () => void;
+  isWindowRecording?: boolean;
+  onWindowRecordingToggle?: () => void;
+  onChooseRecordingDir?: () => void;
+  onOpenRecordings?: () => void;
   // Status bar data
   fps?: number;
   bitrate?: number;
@@ -165,6 +182,16 @@ export function Header({
   onSettingsTabOpened,
   linkEnabled,
   onLinkToggle,
+  ndiOutputAvailable,
+  syphonOutputAvailable,
+  outputSinks,
+  onOutputSinkToggle,
+  isNodeRecording,
+  onNodeRecordingToggle,
+  isWindowRecording,
+  onWindowRecordingToggle,
+  onChooseRecordingDir,
+  onOpenRecordings,
   fps,
   bitrate,
   unifiedMemoryUsed,
@@ -362,6 +389,60 @@ export function Header({
             <MenuItem label="Account Settings..." onClick={() => openSettings("account")} />
             <MenuSeparator />
             <MenuItem label={`Status: ${isConnected ? "Connected" : isConnecting ? "Connecting..." : "Disconnected"}`} disabled />
+          </MenuBarItem>
+
+          <MenuBarItem menuId="output" label="Output" activeMenu={activeMenu} onActivate={setActiveMenu}>
+            {syphonOutputAvailable && (
+              <MenuItem
+                label="Syphon"
+                checked={outputSinks?.syphon?.enabled ?? false}
+                onClick={() => {
+                  const current = outputSinks?.syphon;
+                  onOutputSinkToggle?.("syphon", {
+                    enabled: !(current?.enabled ?? false),
+                    name: current?.name ?? "Scope",
+                  });
+                  closeMenus();
+                }}
+              />
+            )}
+            {ndiOutputAvailable && (
+              <MenuItem
+                label="NDI"
+                checked={outputSinks?.ndi?.enabled ?? false}
+                onClick={() => {
+                  const current = outputSinks?.ndi;
+                  onOutputSinkToggle?.("ndi", {
+                    enabled: !(current?.enabled ?? false),
+                    name: current?.name ?? "Scope",
+                  });
+                  closeMenus();
+                }}
+              />
+            )}
+            {!syphonOutputAvailable && !ndiOutputAvailable && (
+              <MenuItem label="No outputs available" disabled />
+            )}
+            <MenuSeparator />
+            <MenuItem
+              label="Record Pipeline Stages"
+              checked={isNodeRecording ?? false}
+              onClick={() => { onNodeRecordingToggle?.(); closeMenus(); }}
+            />
+            <MenuItem
+              label="Record Window"
+              checked={isWindowRecording ?? false}
+              onClick={() => { onWindowRecordingToggle?.(); closeMenus(); }}
+            />
+            <MenuSeparator />
+            <MenuItem
+              label="Recording Folder..."
+              onClick={() => { onChooseRecordingDir?.(); closeMenus(); }}
+            />
+            <MenuItem
+              label="Open Recordings"
+              onClick={() => { onOpenRecordings?.(); closeMenus(); }}
+            />
           </MenuBarItem>
 
           <MenuBarItem menuId="link" label="Link" activeMenu={activeMenu} onActivate={setActiveMenu}>

@@ -158,6 +158,21 @@ class GraphConfig(BaseModel):
         return errors
 
 
+def unique_node_ids(pipeline_ids: list[str]) -> list[tuple[str, str]]:
+    """Generate unique (node_id, pipeline_id) pairs for duplicate pipeline IDs.
+
+    First occurrence keeps the bare pipeline_id as node_id.
+    Subsequent occurrences get a ``_N`` suffix (e.g. ``kaleidoscope_2``).
+    """
+    counts: dict[str, int] = {}
+    result: list[tuple[str, str]] = []
+    for pid in pipeline_ids:
+        counts[pid] = counts.get(pid, 0) + 1
+        node_id = pid if counts[pid] == 1 else f"{pid}_{counts[pid]}"
+        result.append((node_id, pid))
+    return result
+
+
 def build_linear_graph(
     pipeline_ids: list[str],
     vace_input_video_ids: set[str] | None = None,
@@ -176,21 +191,21 @@ def build_linear_graph(
     _vace_ids = vace_input_video_ids or set()
 
     prev_node_id = "input"
-    for pid in pipeline_ids:
-        nodes.append(GraphNode(id=pid, type="pipeline", pipeline_id=pid))
+    for node_id, pid in unique_node_ids(pipeline_ids):
+        nodes.append(GraphNode(id=node_id, type="pipeline", pipeline_id=pid))
         to_port = "vace_input_frames" if pid in _vace_ids else "video"
         edges.append(
             GraphEdge(
                 **{
                     "from": prev_node_id,
                     "from_port": "video",
-                    "to_node": pid,
+                    "to_node": node_id,
                     "to_port": to_port,
                     "kind": "stream",
                 }
             )
         )
-        prev_node_id = pid
+        prev_node_id = node_id
 
     nodes.append(GraphNode(id="output", type="sink"))
     edges.append(

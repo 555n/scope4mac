@@ -90,6 +90,8 @@ contextBridge.exposeInMainWorld('scope', {
 
   browseDirectory: (title?: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSE_DIRECTORY, title),
 
+  openPath: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_PATH, path),
+
   onDeepLinkAction: (callback: (data: { action: string; [key: string]: string }) => void) => {
     // Validate callback
     if (typeof callback !== 'function') {

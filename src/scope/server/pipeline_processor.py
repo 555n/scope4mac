@@ -72,6 +72,9 @@ class PipelineProcessor:
         # Lock to protect input_queues assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
+        # Per-node recording — set by NodeRecordingManager
+        self.node_recorder = None  # NodeRecorder | None
+
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
         # Latest-write-wins parameter updates (replaces bounded queue)
@@ -563,6 +566,16 @@ class PipelineProcessor:
                 for port, frame_list in chunks.items():
                     call_params[port] = frame_list
 
+            # Log input state for postprocessor chain debugging
+            if chunks and logger.isEnabledFor(logging.DEBUG):
+                for port, flist in chunks.items():
+                    logger.debug(
+                        "[CHAIN] %s recv port=%s frames=%d dtype=%s mean=%.1f",
+                        self.pipeline_id, port, len(flist),
+                        flist[0].dtype if flist else "?",
+                        flist[0].float().mean().item() if flist else 0,
+                    )
+
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
@@ -607,6 +620,15 @@ class PipelineProcessor:
                 processing_time,
             )
 
+            # Log output state for postprocessor chain debugging
+            if output is not None and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[CHAIN] %s emit frames=%d shape=%s dtype=%s mean=%.1f oq_ports=%s",
+                    self.pipeline_id, num_frames, list(output.shape),
+                    output.dtype, output.float().cpu().mean().item(),
+                    list(self.output_queues.keys()),
+                )
+
             # Put each output port's frames to its queues (all frame ports are streamed)
             for port, value in output_dict.items():
                 if value is None or not isinstance(value, torch.Tensor):
@@ -639,6 +661,12 @@ class PipelineProcessor:
                             logger.debug(
                                 f"Output queue full for {self.pipeline_id} port '{port}', dropping frame"
                             )
+
+            # Per-node recording tap (CPU-only, non-blocking)
+            if self.node_recorder is not None and output is not None:
+                rec_data = output.cpu().numpy() if output.device.type != "cpu" else output.numpy()
+                for i in range(rec_data.shape[0]):
+                    self.node_recorder.write_frame(rec_data[i])
 
             # Signal frame ready for event-driven transport
             if self.frame_ready_event is not None and num_frames > 0:

@@ -87,6 +87,9 @@ export function SequencerWindow({
       defaultY={120}
       bodyBackground={ABLETON_COLORS.surfaceBg}
       bodyStyle={{ padding: 12, minHeight: 80 }}
+      allowPopout
+      popoutWidth={720}
+      popoutHeight={400}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {/* Frame Syncopation — existing 4-beat track */}
