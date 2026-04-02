@@ -24,3 +24,10 @@ notes/
 .cursor/
 .specstory/
 *.local*
+
+# Construct session files
+DEV_STATUS.md
+HANDOFF.md
+STATE.md
+FINDINGS.md
+REDESIGN_NOTES.md
